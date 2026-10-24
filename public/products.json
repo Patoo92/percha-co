@@ -1,0 +1,62 @@
+[
+  {
+    "id": 1,
+    "name": "Producto de ejemplo 1",
+    "price": 19.9,
+    "description": "Descripción de ejemplo. Reemplazar por los datos reales.",
+    "images": [],
+    "category": "productos"
+  },
+  {
+    "id": 2,
+    "name": "Remera de ejemplo (ropa)",
+    "price": 34.5,
+    "description": "Ejemplo de producto con talles.",
+    "images": [],
+    "sizes": [
+      "S",
+      "M",
+      "L",
+      "XL"
+    ],
+    "category": "ropa"
+  },
+  {
+    "id": 3,
+    "name": "Producto de ejemplo 3",
+    "price": 12,
+    "description": "",
+    "images": [],
+    "category": "productos"
+  },
+  {
+    "id": 4,
+    "name": "Pantalón de ejemplo (ropa)",
+    "price": 59.99,
+    "description": "Ejemplo de producto con talles.",
+    "images": [],
+    "sizes": [
+      "38",
+      "40",
+      "42",
+      "44"
+    ],
+    "category": "ropa"
+  },
+  {
+    "id": 5,
+    "name": "Producto de ejemplo 5",
+    "price": 8.5,
+    "description": "",
+    "images": [],
+    "category": "productos"
+  },
+  {
+    "id": 6,
+    "name": "Producto de ejemplo 6",
+    "price": 24,
+    "description": "Descripción de ejemplo. Reemplazar por los datos reales.",
+    "images": [],
+    "category": "productos"
+  }
+]
