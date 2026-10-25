@@ -7,7 +7,10 @@ Requisitos: Node.js 18 o superior.
     npm run build    # genera la carpeta dist/ para publicar
 
 - Datos de la tienda (nombre, WhatsApp, moneda): src/config.js
-- Productos: public/products.json
+- Productos: se cargan desde la API de Google Apps Script configurada como `PRODUCTS_API_URL` en `src/config.js`.
+  El endpoint público debe devolver un arreglo JSON con los campos `id`, `name`, `price`, `category`,
+  `description`, `images` y `sizes`. Las imágenes admiten rutas locales de `public/`, URLs completas
+  o referencias `drive:<ID>` que se resuelven usando `?action=imagen` en Apps Script.
 - Fotos: public/img/. Hasta 5 por producto; la primera es la que se ve en la tarjeta:
   "images": ["img/remera-1.jpg", "img/remera-2.jpg"]
   Sin fotos se muestra un recuadro con la inicial.
