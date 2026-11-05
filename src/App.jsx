@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { STORE_NAME, WHATSAPP_NUMBER, CURRENCY, BRAND, CONTACT_EMAIL, SOCIAL, PRODUCTS_API_URL } from './config.js'
+import RegistroVendedor from './RegistroVendedor.jsx'
 import { LegalText, LEGAL_TITLES } from './Legal.jsx'
 
 const MAX_PHOTOS = 5
@@ -330,6 +331,7 @@ function Footer({ onLegal }) {
 }
 
 export default function App() {
+  const [vista, setVista] = useState('catalogo')
   const [products, setProducts] = useState(null)
   const [error, setError] = useState(false)
   const [selected, setSelected] = useState(null)
@@ -366,7 +368,10 @@ export default function App() {
   useEffect(() => {
     fetch(PRODUCTS_API_URL)
       .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then(setProducts)
+      .then((result) => {
+        if (!Array.isArray(result)) throw new Error('La respuesta del catálogo no es válida.')
+        setProducts(result)
+      })
       .catch(() => setError(true))
   }, [])
 
@@ -390,9 +395,15 @@ export default function App() {
   }
   const pickCategory = (k) => { setCategory(k); setPage(1) }
   const selectMenuCategory = (k) => {
+    setVista('catalogo')
     pickCategory(k)
     setMenuOpen(false)
     catalogRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  }
+  const openRegistration = () => {
+    setVista('registro')
+    setMenuOpen(false)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   const waGroups = () => {
@@ -420,6 +431,7 @@ export default function App() {
       <header className="top">
         <h1 className="brand"><img src={base + 'logo.svg'} alt={STORE_NAME} /></h1>
         <div className="header-actions">
+          <button className="seller-entry" onClick={openRegistration}>Vender</button>
           <button className="theme-toggle" onClick={() => setTheme((t) => t === 'dark' ? 'light' : 'dark')} aria-label={theme === 'dark' ? 'Activar modo claro' : 'Activar modo oscuro'} aria-pressed={theme === 'dark'}>
             <ThemeIcon dark={theme === 'dark'} />
           </button>
@@ -433,10 +445,14 @@ export default function App() {
               <button className="nav-link" key={key} onClick={() => selectMenuCategory(key)}>{label}</button>
             ))}
             <button className="nav-link" onClick={() => selectMenuCategory('favoritos')}>Favoritos</button>
+            <button className="nav-link" onClick={openRegistration}>Vender en Percha&amp;Co</button>
             <button className="nav-link" onClick={() => { setMenuOpen(false); document.getElementById('contacto')?.scrollIntoView({ behavior: 'smooth' }) }}>Contacto</button>
           </nav>
         )}
       </header>
+      {vista === 'registro' ? (
+        <RegistroVendedor onVolver={() => setVista('catalogo')} onLegal={setLegal} />
+      ) : (
       <main ref={catalogRef}>
         {products && products.length > 0 && (
           <div className="tabs" ref={topRef} role="group" aria-label="Categorías">
@@ -484,6 +500,7 @@ export default function App() {
         )}
         <Pagination page={cur} total={totalPages} onChange={goPage} />
       </main>
+      )}
       <Footer onLegal={setLegal} />
       <CookieBanner onInfo={() => setLegal('cookies')} />
       <a className="floating-wa" href={contactWa} target="_blank" rel="noopener noreferrer" aria-label="Consultar por WhatsApp">

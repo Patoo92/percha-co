@@ -5,6 +5,7 @@ export const CURRENCY = 'EUR'
 export const BRAND = 'ColorBit'
 export const CONTACT_EMAIL = 'patoog58@gmail.com'
 export const PRODUCTS_API_URL = 'https://script.google.com/macros/s/AKfycbzJueyDnNOt9wsxt1mvmGciso4EtQA69eev5HBnK1vRWuFxUo6ov0Ym182fm9pTo_M-/exec?action=productos'
+export const API_URL = new URL(PRODUCTS_API_URL).origin + new URL(PRODUCTS_API_URL).pathname
 // Redes: cuando las crees, pegá la URL completa. Vacío = se muestra "próximamente".
 export const SOCIAL = { Instagram: '', Facebook: '', X: '' }
 // Datos legales del titular (art. 10 LSSI). COMPLETAR antes de publicar.
