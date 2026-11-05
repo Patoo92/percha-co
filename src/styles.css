@@ -141,3 +141,6 @@ button:not(:disabled):active,.floating-wa:active{transform:scale(.97)}
   *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}
   .reveal{opacity:1;transform:none}
 }
+.fav-bar .wa.inline{margin:0 8px 8px 0}
+.legal h3{margin:18px 0 4px;font-size:1.05rem}
+.legal ul{padding-left:20px}
