@@ -8,6 +8,12 @@ const CATEGORIES = [['todos', 'Todos'], ['ropa', 'Ropa'], ['productos', 'Product
 const FAV_KEY = 'percha-favoritos'
 const MAX_WA_ITEMS = 20
 const money = new Intl.NumberFormat('es-ES', { style: 'currency', currency: CURRENCY })
+const PHONE_RE = /^\d{8,15}$/
+// Si el producto tiene vendedor con un WhatsApp válido, se usa su número; si no, el de la tienda.
+const sellerOf = (p) => (p && p.seller && PHONE_RE.test(String(p.seller.whatsapp))
+  ? { name: String(p.seller.name || '').trim(), phone: String(p.seller.whatsapp) }
+  : null)
+const phoneOf = (p) => (sellerOf(p) ? sellerOf(p).phone : WHATSAPP_NUMBER)
 const base = import.meta.env.BASE_URL
 const DRIVE_IMAGE_PREFIX = 'drive:'
 
@@ -203,8 +209,9 @@ function Detail({ product, isFav, onToggleFav, onClose }) {
   }, [onClose])
 
   const needsSize = sizes.length > 0 && !size
-  const msg = `Hola, me interesa "${product.name}"${size ? `, talle ${size}` : ''} (${money.format(product.price)}).`
-  const wa = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(msg)}`
+  const seller = sellerOf(product)
+  const msg = `Hola, me interesa "${product.name}"${size ? `, talle ${size}` : ''} (${money.format(product.price)}).${seller ? ` Lo vi en ${STORE_NAME}.` : ''}`
+  const wa = `https://wa.me/${phoneOf(product)}?text=${encodeURIComponent(msg)}`
 
   return (
     <div className="overlay" onClick={onClose}>
@@ -228,6 +235,7 @@ function Detail({ product, isFav, onToggleFav, onClose }) {
             <FavButton product={product} isFav={isFav} onToggle={onToggleFav} inline />
           </div>
           <p className="price">{money.format(product.price)}</p>
+          {seller && seller.name && <p className="seller">Vendido por <b>{seller.name}</b></p>}
           {product.description && <p className="desc">{product.description}</p>}
           {sizes.length > 0 && (
             <div>
@@ -387,11 +395,24 @@ export default function App() {
     catalogRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
   }
 
-  const waList = () => {
-    const items = favProducts.slice(0, MAX_WA_ITEMS).map((p) => `- ${p.name} (${money.format(p.price)})${(p.sizes || []).length ? ' - talle a confirmar' : ''}`)
-    const extra = favProducts.length > MAX_WA_ITEMS ? `\n(y ${favProducts.length - MAX_WA_ITEMS} más)` : ''
-    return `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent(`Hola, me interesan estos productos:\n${items.join('\n')}${extra}`)}`
+  const waGroups = () => {
+    const groups = new Map()
+    favProducts.forEach((p) => {
+      const phone = phoneOf(p)
+      if (!groups.has(phone)) groups.set(phone, { phone, name: (sellerOf(p) || {}).name || '', items: [] })
+      groups.get(phone).items.push(p)
+    })
+    return [...groups.values()].map((g) => {
+      const lines = g.items.slice(0, MAX_WA_ITEMS).map((p) => `- ${p.name} (${money.format(p.price)})${(p.sizes || []).length ? ' - talle a confirmar' : ''}`)
+      const extra = g.items.length > MAX_WA_ITEMS ? `\n(y ${g.items.length - MAX_WA_ITEMS} más)` : ''
+      return {
+        ...g,
+        truncated: g.items.length > MAX_WA_ITEMS,
+        url: `https://wa.me/${g.phone}?text=${encodeURIComponent(`Hola, me interesan estos productos:\n${lines.join('\n')}${extra}`)}`,
+      }
+    })
   }
+  const favGroups = category === 'favoritos' ? waGroups() : []
   const contactWa = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent('Hola, quisiera hacer una consulta.')}`
 
   return (
@@ -438,8 +459,12 @@ export default function App() {
         )}
         {category === 'favoritos' && favProducts.length > 0 && (
           <div className="fav-bar">
-            <a className="wa inline" href={waList()} target="_blank" rel="noopener noreferrer">Enviar mi lista por WhatsApp</a>
-            {favProducts.length > MAX_WA_ITEMS && <p className="note">Se envían los primeros {MAX_WA_ITEMS} productos de tu lista.</p>}
+            {favGroups.map((g) => (
+              <a key={g.phone} className="wa inline" href={g.url} target="_blank" rel="noopener noreferrer">
+                {favGroups.length === 1 && !g.name ? 'Enviar mi lista por WhatsApp' : `Enviar a ${g.name || STORE_NAME} (${g.items.length})`}
+              </a>
+            ))}
+            {favGroups.some((g) => g.truncated) && <p className="note">Se envían los primeros {MAX_WA_ITEMS} productos de cada lista.</p>}
           </div>
         )}
         {shown.length > 0 && (

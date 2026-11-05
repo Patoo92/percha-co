@@ -25,6 +25,7 @@ main{padding-top:16px;padding-bottom:56px}
 .detail-body{padding:28px 24px;display:flex;flex-direction:column;gap:14px}
 .detail-body h2{margin:0;font-size:1.5rem;letter-spacing:-.01em}
 .price{margin:0;font-size:2rem;font-weight:700;color:var(--ink)}
+.seller{margin:0;color:var(--muted)}
 .desc{margin:0;color:var(--muted);max-width:60ch}
 .label{margin:0 0 6px;font-weight:600}
 .sizes{display:flex;flex-wrap:wrap;gap:8px}
