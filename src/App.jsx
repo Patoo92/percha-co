@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { STORE_NAME, WHATSAPP_NUMBER, CURRENCY, BRAND, CONTACT_EMAIL, SOCIAL, PRODUCTS_API_URL } from './config.js'
 import RegistroVendedor from './RegistroVendedor.jsx'
+import PortalVendedor from './PortalVendedor.jsx'
 import { LegalText, LEGAL_TITLES } from './Legal.jsx'
 
 const MAX_PHOTOS = 5
@@ -493,6 +494,11 @@ export default function App() {
     setMenuOpen(false)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
+  const openSellerPortal = () => {
+    setVista('vendedor')
+    setMenuOpen(false)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
   const chooseSellerPlan = (plan, destaque) => {
     setSellerSelection({ plan, destaque })
     setVista('registro')
@@ -523,6 +529,7 @@ export default function App() {
         <h1 className="brand"><img src={base + 'logo.svg'} alt={STORE_NAME} /></h1>
         <div className="header-actions">
           <button className="seller-entry" onClick={openPlans}>Vende con nosotros</button>
+          <button className="seller-portal-entry" onClick={openSellerPortal}>Acceso vendedores</button>
           <button className="theme-toggle" onClick={() => setTheme((t) => t === 'dark' ? 'light' : 'dark')} aria-label={theme === 'dark' ? 'Activar modo claro' : 'Activar modo oscuro'} aria-pressed={theme === 'dark'}>
             <ThemeIcon dark={theme === 'dark'} />
           </button>
@@ -537,6 +544,7 @@ export default function App() {
             ))}
             <button className="nav-link" onClick={() => selectMenuCategory('favoritos')}>Favoritos</button>
             <button className="nav-link" onClick={openPlans}>Planes para vendedores</button>
+            <button className="nav-link" onClick={openSellerPortal}>Área de vendedor</button>
             <button className="nav-link" onClick={() => { setMenuOpen(false); document.getElementById('contacto')?.scrollIntoView({ behavior: 'smooth' }) }}>Contacto</button>
           </nav>
         )}
@@ -551,6 +559,8 @@ export default function App() {
           onVolver={() => setVista('planes')}
           onLegal={setLegal}
         />
+      ) : vista === 'vendedor' ? (
+        <PortalVendedor onBack={() => setVista('catalogo')} />
       ) : (
       <main ref={catalogRef}>
         {vista === 'catalogo' && featuredProducts.length > 0 && (

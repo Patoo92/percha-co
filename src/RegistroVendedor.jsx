@@ -45,6 +45,7 @@ export default function RegistroVendedor({ initialPlan, initialDestaque, onVolve
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [deliveryWarning, setDeliveryWarning] = useState('')
 
   useEffect(() => {
     let active = true
@@ -88,12 +89,14 @@ export default function RegistroVendedor({ initialPlan, initialDestaque, onVolve
     }))
     setError('')
     setSuccess('')
+    setDeliveryWarning('')
   }
 
   const updateDocument = (event) => {
     const file = event.target.files?.[0]
     setError('')
     setSuccess('')
+    setDeliveryWarning('')
     if (!file) {
       setDocumento(null)
       return
@@ -117,6 +120,7 @@ export default function RegistroVendedor({ initialPlan, initialDestaque, onVolve
     event.preventDefault()
     setError('')
     setSuccess('')
+    setDeliveryWarning('')
 
     if (!documento) {
       setError('Adjunta una imagen o PDF de tu DNI/NIE.')
@@ -147,6 +151,14 @@ export default function RegistroVendedor({ initialPlan, initialDestaque, onVolve
       }
 
       setSuccess(`Solicitud enviada. Tu ID de vendedor es ${result.idVendedor}.`)
+      const deliveryWarnings = []
+      if (result.emailEnviado !== true) {
+        deliveryWarnings.push('No se pudo enviar el correo de confirmación al vendedor.')
+      }
+      if (result.avisoTiendaEnviado !== true) {
+        deliveryWarnings.push('No se pudo avisar a la tienda; el alta quedó guardada y debe revisarse en la hoja.')
+      }
+      setDeliveryWarning(deliveryWarnings.join(' '))
       setDocumento(null)
       setForm({
         nombre: '',
@@ -249,6 +261,7 @@ export default function RegistroVendedor({ initialPlan, initialDestaque, onVolve
 
         {error && <p className="registration-message is-error" role="alert">{error}</p>}
         {success && <p className="registration-message is-success" role="status">{success}</p>}
+        {deliveryWarning && <p className="registration-message is-error" role="alert">{deliveryWarning}</p>}
 
         <button className="registration-submit" type="submit" disabled={loading || featuredAvailability === 'loading'}>
           {loading ? 'Enviando solicitud…' : 'Enviar solicitud'}

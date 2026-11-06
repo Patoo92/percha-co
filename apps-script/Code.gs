@@ -9,6 +9,9 @@ var FEATURED_PRICES = {
 var MAX_FEATURED_SELLERS = 5;
 var MAX_ID_DOCUMENT_BYTES = 5 * 1024 * 1024;
 var MAX_PUBLIC_IMAGE_BYTES = 5 * 1024 * 1024;
+var MAX_PRODUCT_IMAGES = 3;
+var MAX_FEATURED_PRODUCT_IMAGES = 5;
+var PRODUCT_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"];
 var STORE_CONTACT_EMAIL = "patoog58@gmail.com";
 var STORE_WHATSAPP_NUMBER = "34600369376";
 var BIZUM_PHONE_NUMBER = "+34 600 369 376";
@@ -41,6 +44,768 @@ function etiquetaDestaque_(destaque) {
     "3_Semanas": "3 semanas",
     "1_Mes": "1 mes"
   }[destaque] || destaque;
+}
+
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu("Percha & Co.")
+    .addItem("Cargar imágenes del producto", "abrirCargaImagenesProducto")
+    .addItem("Aplicar solicitud seleccionada", "aplicarSolicitudImagenSeleccionada")
+    .addItem("Proteger columna de imágenes", "protegerImagenesCatalogo")
+    .addItem("Enviar bienvenida al vendedor seleccionado", "enviarBienvenidaSeleccionada")
+    .addToUi();
+}
+
+function emailActivo_() {
+  var email = String(Session.getActiveUser().getEmail() || "").trim().toLowerCase();
+  if (!email) {
+    throw new Error("Google no pudo identificar tu cuenta. Inicia sesión con el correo registrado en VENDEDORES_MKP.");
+  }
+  return email;
+}
+
+function emailPropietario_() {
+  return String(
+    PropertiesService.getScriptProperties().getProperty("STORE_OWNER_EMAIL") ||
+    STORE_CONTACT_EMAIL
+  ).trim().toLowerCase();
+}
+
+function hashSellerSecret_(value) {
+  var properties = PropertiesService.getScriptProperties();
+  var pepper = properties.getProperty("SELLER_AUTH_PEPPER");
+  if (!pepper) {
+    pepper = Utilities.getUuid() + Utilities.getUuid();
+    properties.setProperty("SELLER_AUTH_PEPPER", pepper);
+  }
+  return Utilities.base64EncodeWebSafe(
+    Utilities.computeHmacSha256Signature(String(value), pepper)
+  );
+}
+
+function buscarVendedorPorEmail_(email) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("VENDEDORES_MKP");
+  if (!sheet || sheet.getLastRow() < 2) return null;
+
+  var headers = leerEncabezados_(sheet);
+  var rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).getValues();
+  var emailCol = indiceColumna_(headers, "Email");
+  var idCol = indiceColumna_(headers, "ID_Vendedor");
+  var activeCol = indiceColumna_(headers, "Activo");
+  var paymentCol = indiceColumna_(headers, "Estado_pago");
+  var planCol = indiceColumna_(headers, "Plan");
+  for (var index = 0; index < rows.length; index++) {
+    if (String(rows[index][emailCol] || "").trim().toLowerCase() !== email) continue;
+
+    var active = String(rows[index][activeCol] || "").trim().toLowerCase();
+    var payment = String(rows[index][paymentCol] || "").trim().toLowerCase();
+    if (["si", "sí", "true", "activo"].indexOf(active) < 0 ||
+        (payment !== "aprobado" && payment !== "no_requerido")) return null;
+
+    return {
+      id: String(rows[index][idCol] || "").trim(),
+      email: email,
+      plan: String(rows[index][planCol] || "").trim()
+    };
+  }
+  return null;
+}
+
+function solicitarCodigoAccesoVendedor(email) {
+  email = String(email || "").trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error("Introduce un correo electrónico válido.");
+  }
+
+  var emailHash = hashSellerSecret_(email);
+  var cache = CacheService.getScriptCache();
+  var throttleKey = "seller-otp-throttle:" + emailHash;
+  if (cache.get(throttleKey)) {
+    return { status: "success", message: "Si la cuenta está aprobada, recibirás un código por correo." };
+  }
+  var quotaKey = "seller-otp-quota:" + emailHash;
+  var sentInWindow = Number(cache.get(quotaKey) || 0);
+  if (sentInWindow >= 5) {
+    return { status: "success", message: "Si la cuenta está aprobada, recibirás un código por correo." };
+  }
+
+  var seller = buscarVendedorPorEmail_(email);
+  if (seller) {
+    var code = String(
+      parseInt(Utilities.getUuid().replace(/-/g, "").slice(0, 8), 16) % 1000000
+    ).padStart(6, "0");
+    cache.put("seller-otp:" + emailHash, JSON.stringify({
+      sellerId: seller.id,
+      codeHash: hashSellerSecret_(email + ":" + code),
+      attempts: 0
+    }), 600);
+    try {
+      MailApp.sendEmail({
+        to: email,
+        subject: "Tu código de acceso a Percha&Co",
+        body: "Tu código de acceso de vendedor es " + code +
+          ". Caduca en 10 minutos. Si no solicitaste este código, ignora el mensaje.",
+        name: "Percha&Co",
+        replyTo: STORE_CONTACT_EMAIL
+      });
+      cache.put(quotaKey, String(sentInWindow + 1), 21600);
+    } catch (mailError) {
+      cache.remove("seller-otp:" + emailHash);
+      console.error("No se pudo enviar el código de acceso al vendedor.", mailError);
+      throw new Error("No se pudo enviar el código. Inténtalo más tarde o contacta con la tienda.");
+    }
+  }
+
+  cache.put(throttleKey, "1", 60);
+  return { status: "success", message: "Si la cuenta está aprobada, recibirás un código por correo." };
+}
+
+function verificarCodigoAccesoVendedor(email, code) {
+  email = String(email || "").trim().toLowerCase();
+  code = String(code || "").trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !/^\d{6}$/.test(code)) {
+    throw new Error("El correo o el código no son válidos.");
+  }
+
+  var cache = CacheService.getScriptCache();
+  var emailHash = hashSellerSecret_(email);
+  var otpKey = "seller-otp:" + emailHash;
+  var raw = cache.get(otpKey);
+  if (!raw) throw new Error("El código caducó o no es válido. Solicita uno nuevo.");
+
+  var otp = JSON.parse(raw);
+  if (otp.attempts >= 5) {
+    cache.remove(otpKey);
+    throw new Error("Se agotaron los intentos. Solicita un nuevo código.");
+  }
+  if (otp.codeHash !== hashSellerSecret_(email + ":" + code)) {
+    otp.attempts++;
+    cache.put(otpKey, JSON.stringify(otp), 600);
+    throw new Error("El código no es correcto.");
+  }
+  cache.remove(otpKey);
+
+  var seller = buscarVendedorPorEmail_(email);
+  if (!seller || seller.id !== otp.sellerId) {
+    throw new Error("La cuenta ya no está activa. Contacta con la tienda.");
+  }
+  var token = Utilities.getUuid() + Utilities.getUuid();
+  cache.put("seller-session:" + hashSellerSecret_(token), seller.id, 21600);
+  return { status: "success", token: token, sellerId: seller.id, plan: seller.plan };
+}
+
+function validarSesionVendedor_(token) {
+  token = String(token || "");
+  if (!/^[A-Za-z0-9-]{60,80}$/.test(token)) {
+    throw new Error("La sesión caducó. Vuelve a solicitar un código de acceso.");
+  }
+  var sellerId = CacheService.getScriptCache().get(
+    "seller-session:" + hashSellerSecret_(token)
+  );
+  if (!sellerId) throw new Error("La sesión caducó. Vuelve a solicitar un código de acceso.");
+  var email = obtenerEmailVendedor(SpreadsheetApp.getActiveSpreadsheet(), sellerId)
+    .trim().toLowerCase();
+  var seller = buscarVendedorPorEmail_(email);
+  if (!seller || seller.id !== sellerId) {
+    throw new Error("La cuenta ya no está activa. Contacta con la tienda.");
+  }
+  return seller;
+}
+
+function subirImagenProductoVendedor(token, file) {
+  var seller = validarSesionVendedor_(token);
+  if (!file || typeof file.base64 !== "string" ||
+      PRODUCT_IMAGE_TYPES.indexOf(String(file.mimeType || "").toLowerCase()) < 0) {
+    throw new Error("Selecciona una imagen JPG, PNG, GIF o WebP válida.");
+  }
+  if (file.base64.length > Math.ceil(MAX_PUBLIC_IMAGE_BYTES / 3) * 4 + 4) {
+    throw new Error("Cada imagen debe pesar como máximo 5 MB.");
+  }
+
+  var bytes = Utilities.base64Decode(file.base64.replace(/^data:[^;]+;base64,/i, ""));
+  if (!bytes.length || bytes.length > MAX_PUBLIC_IMAGE_BYTES) {
+    throw new Error("Cada imagen debe pesar más de 0 y como máximo 5 MB.");
+  }
+  var first = bytes.slice(0, 8).map(function (byte) { return (byte + 256) % 256; });
+  var mimeType = String(file.mimeType).toLowerCase();
+  var validSignature = mimeType === "image/jpeg"
+    ? first[0] === 255 && first[1] === 216 && first[2] === 255
+    : mimeType === "image/png"
+      ? first.join(",") === "137,80,78,71,13,10,26,10"
+      : mimeType === "image/gif"
+        ? String.fromCharCode.apply(null, first.slice(0, 3)) === "GIF"
+        : String.fromCharCode.apply(null, first.slice(0, 4)) === "RIFF" &&
+          String.fromCharCode.apply(null, bytes.slice(8, 12).map(function (byte) {
+            return (byte + 256) % 256;
+          })) === "WEBP";
+  if (!validSignature) throw new Error("El contenido no coincide con el formato de imagen.");
+
+  var safeName = String(file.name || "producto").replace(/[\u0000-\u001f\\/:*?"<>|]/g, "_").slice(0, 150);
+  var driveFile = obtenerCarpetaImagenesProducto_().createFile(
+    Utilities.newBlob(bytes, mimeType, safeName || "producto")
+  );
+  var uploadToken = Utilities.getUuid();
+  CacheService.getScriptCache().put(
+    "seller-product-upload:" + driveFile.getId(),
+    JSON.stringify({ token: uploadToken, sellerId: seller.id }),
+    1800
+  );
+  return { status: "success", id: driveFile.getId(), token: uploadToken, name: driveFile.getName() };
+}
+
+function obtenerCargaProductoVendedor_(seller, upload) {
+  if (!upload || typeof upload.id !== "string" || !/^[A-Za-z0-9_-]{20,}$/.test(upload.id) ||
+      typeof upload.token !== "string") {
+    throw new Error("Una imagen cargada ya no es válida. Vuelve a subirla.");
+  }
+  var cache = CacheService.getScriptCache();
+  var key = "seller-product-upload:" + upload.id;
+  var record = cache.get(key);
+  if (!record) throw new Error("Una carga caducó. Vuelve a subir la imagen.");
+  record = JSON.parse(record);
+  if (record.sellerId !== seller.id || record.token !== upload.token) {
+    throw new Error("Una imagen cargada no pertenece a esta sesión.");
+  }
+  var file = DriveApp.getFileById(upload.id);
+  var parents = file.getParents();
+  var inProductFolder = false;
+  var folderId = obtenerCarpetaImagenesProducto_().getId();
+  while (parents.hasNext()) {
+    if (parents.next().getId() === folderId) inProductFolder = true;
+  }
+  if (!inProductFolder || PRODUCT_IMAGE_TYPES.indexOf(file.getMimeType()) < 0 ||
+      file.getSize() > MAX_PUBLIC_IMAGE_BYTES) {
+    throw new Error("Una imagen no cumple los requisitos o no está en la carpeta privada.");
+  }
+  return { file: file, cacheKey: key };
+}
+
+function cancelarCargaProductoVendedor(token, uploads) {
+  var seller = validarSesionVendedor_(token);
+  if (!Array.isArray(uploads)) throw new Error("La lista de imágenes no es válida.");
+  uploads.forEach(function (upload) {
+    var entry = obtenerCargaProductoVendedor_(seller, upload);
+    entry.file.setTrashed(true);
+    CacheService.getScriptCache().remove(entry.cacheKey);
+  });
+  return { status: "success" };
+}
+
+function listarProductosVendedor(token) {
+  var seller = validarSesionVendedor_(token);
+  var catalog = obtenerHojaCatalogo_(SpreadsheetApp.getActiveSpreadsheet());
+  var headers = leerEncabezados_(catalog);
+  var rows = catalog.getLastRow() > 1
+    ? catalog.getRange(2, 1, catalog.getLastRow() - 1, headers.length).getDisplayValues()
+    : [];
+  var sellerInfo = obtenerMapaVendedores_()[seller.id];
+  var sellerCol = indiceColumna_(headers, "ID_Vendedor");
+  var owned = rows.filter(function (row) { return String(row[sellerCol]) === seller.id; });
+  var statuses = owned.map(function (row) {
+    return {
+      name: String(row[indiceColumna_(headers, "Producto")] || ""),
+      status: String(row[indiceColumna_(headers, "Activo")] || "")
+    };
+  });
+  return {
+    status: "success",
+    sellerId: seller.id,
+    plan: seller.plan,
+    canFeature: Boolean(sellerInfo && sellerInfo.featured && !sellerInfo.featuredProductId),
+    count: owned.filter(function (row) {
+      return String(row[indiceColumna_(headers, "Activo")]).toLowerCase() !== "suspendido";
+    }).length,
+    limit: seller.plan === "Freemium" ? 5 : seller.plan === "Plus" ? 10 : 20,
+    products: statuses
+  };
+}
+
+function crearProductoVendedor(token, data) {
+  var seller = validarSesionVendedor_(token);
+  data = data || {};
+  var name = String(data.name || "").trim();
+  var category = String(data.category || "").trim().toLowerCase();
+  var description = String(data.description || "").trim();
+  if (data.price === undefined || data.price === null || String(data.price).trim() === "") {
+    throw new Error("Introduce un precio válido entre 0 y 100.000 €.");
+  }
+  var price = Number(data.price);
+  var sizes = Array.isArray(data.sizes) ? data.sizes : [];
+  var images = Array.isArray(data.images) ? data.images : [];
+  var featured = data.featured === true;
+  if (name.length < 2 || name.length > 100 || /^[=+\-@]/.test(name)) {
+    throw new Error("El nombre debe tener entre 2 y 100 caracteres y ser texto.");
+  }
+  if (!Number.isFinite(price) || price < 0 || price > 100000) {
+    throw new Error("Introduce un precio válido entre 0 y 100.000 €.");
+  }
+  if (["ropa", "productos"].indexOf(category) < 0) {
+    throw new Error("Selecciona una categoría válida.");
+  }
+  if (description.length > 1000 || /^[=+\-@]/.test(description)) {
+    throw new Error("La descripción no puede superar 1.000 caracteres ni comenzar con un símbolo de fórmula.");
+  }
+  if (category !== "ropa" && sizes.length) {
+    throw new Error("Solo se pueden indicar talles para productos de ropa.");
+  }
+  if (sizes.length > 20 || sizes.some(function (size) {
+    return typeof size !== "string" || size.trim().length > 20 || /^[=+\-@]/.test(size.trim());
+  })) {
+    throw new Error("Revisa la lista de talles.");
+  }
+  var sellerInfo = obtenerMapaVendedores_()[seller.id];
+  if (featured && (!sellerInfo || !sellerInfo.featured ||
+      (sellerInfo.featuredProductId && sellerInfo.featuredProductId !== String(data.id || "")))) {
+    throw new Error("El destaque debe estar activo y disponible para esta publicación.");
+  }
+  var maxImages = featured ? MAX_FEATURED_PRODUCT_IMAGES : MAX_PRODUCT_IMAGES;
+  if (images.length < 1 || images.length > maxImages) {
+    throw new Error("Esta publicación admite entre 1 y " + maxImages + " imágenes.");
+  }
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  var createdFiles = [];
+  try {
+    if (!puedeSubirProducto(seller.id)) {
+      throw new Error("Alcanzaste el límite de productos de tu plan.");
+    }
+    var uploaded = images.map(function (image) {
+      var verified = obtenerCargaProductoVendedor_(seller, image);
+      createdFiles.push(verified);
+      return verified;
+    });
+
+    var catalog = obtenerHojaCatalogo_(SpreadsheetApp.getActiveSpreadsheet());
+    var headers = leerEncabezados_(catalog);
+    var productId = "P-" + Utilities.getUuid();
+    var fields = {
+      producto: name,
+      precioventa: price,
+      imageurl: "",
+      id: productId,
+      categoria: category,
+      descripcion: description,
+      talles: category === "ropa" ? sizes.map(function (size) { return size.trim(); }).join(", ") : "",
+      activo: "Pendiente",
+      idvendedor: seller.id,
+      fechasubida: new Date()
+    };
+    var row = headers.map(function (header) {
+      var key = normalizarEncabezado_(header);
+      return Object.prototype.hasOwnProperty.call(fields, key) ? fields[key] : "";
+    });
+    catalog.appendRow(row);
+    var productRow = catalog.getLastRow();
+    var imageCol = indiceColumna_(headers, "Image_URL") + 1;
+    var richText = SpreadsheetApp.newRichTextValue();
+    var names = uploaded.map(function (entry) { return entry.file.getName(); });
+    richText.setText(names.join("\n"));
+    var offset = 0;
+    uploaded.forEach(function (entry, index) {
+      var end = offset + names[index].length;
+      richText.setLinkUrl(offset, end, entry.file.getUrl());
+      offset = end + (index < names.length - 1 ? 1 : 0);
+    });
+    catalog.getRange(productRow, imageCol).setRichTextValue(richText.build());
+    if (featured && (!sellerInfo.featuredProductId || sellerInfo.featuredProductId === productId)) {
+      var sellers = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("VENDEDORES_MKP");
+      var sellerHeaders = asegurarColumnasRevisionVendedor_(sellers);
+      var sellerRows = sellers.getRange(2, 1, sellers.getLastRow() - 1, sellerHeaders.length).getValues();
+      var idCol = indiceColumna_(sellerHeaders, "ID_Vendedor");
+      var sellerIndex = sellerRows.findIndex(function (row) { return String(row[idCol]) === seller.id; });
+      if (sellerIndex >= 0) {
+        asignarCelda_(sellers, sellerHeaders, sellerIndex + 2, "ID_Producto_Destacado", productId);
+      }
+    }
+    CacheService.getScriptCache().removeAll(createdFiles.map(function (entry) { return entry.cacheKey; }));
+    try {
+      MailApp.sendEmail({
+        to: STORE_CONTACT_EMAIL,
+        subject: "Nuevo producto pendiente de revisión — Percha&Co",
+        body: "El vendedor " + seller.id + " envió «" + name + "» para revisión. " +
+          "El producto quedó en Pendiente en la hoja del catálogo."
+      });
+    } catch (mailError) {
+      console.error("No se pudo avisar a la tienda del nuevo producto " + productId + ".", mailError);
+    }
+    return { status: "success", id: productId, name: name, state: "Pendiente" };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function asegurarColumnasRevisionVendedor_(sheet) {
+  var headers = leerEncabezados_(sheet);
+  ["Estado_Revision", "Fecha_Bienvenida"].forEach(function (name) {
+    var key = normalizarEncabezado_(name);
+    if (headers.some(function (header) {
+      return normalizarEncabezado_(header) === key;
+    })) return;
+
+    sheet.getRange(1, headers.length + 1).setValue(name);
+    headers.push(name);
+  });
+
+  if (sheet.getLastRow() < 2) return headers;
+  var rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).getValues();
+  var idCol = indiceColumna_(headers, "ID_Vendedor");
+  var activeCol = indiceColumna_(headers, "Activo");
+  var paymentCol = indiceColumna_(headers, "Estado_pago");
+  var reviewCol = indiceColumna_(headers, "Estado_Revision");
+  rows.forEach(function (row, index) {
+    if (!row[idCol] || row[reviewCol]) return;
+
+    var active = String(row[activeCol] || "").trim().toLowerCase();
+    var payment = String(row[paymentCol] || "").trim().toLowerCase();
+    var state = ["si", "sí", "true", "activo"].indexOf(active) >= 0
+      ? "Aprobado"
+      : ["rechazado", "cancelado"].indexOf(payment) >= 0
+        ? "Rechazado"
+        : "Pendiente";
+    sheet.getRange(index + 2, reviewCol + 1).setValue(state);
+  });
+  return headers;
+}
+
+function enviarBienvenidaVendedor_(sheet, headers, rowNumber) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    headers = asegurarColumnasRevisionVendedor_(sheet);
+    var welcomeCol = indiceColumna_(headers, "Fecha_Bienvenida") + 1;
+    if (sheet.getRange(rowNumber, welcomeCol).getValue()) return false;
+
+    var email = String(
+      sheet.getRange(rowNumber, indiceColumna_(headers, "Email") + 1).getValue() || ""
+    ).trim();
+    var name = String(
+      sheet.getRange(rowNumber, indiceColumna_(headers, "Nombre") + 1).getValue() || ""
+    ).trim();
+    var sellerId = String(
+      sheet.getRange(rowNumber, indiceColumna_(headers, "ID_Vendedor") + 1).getValue() || ""
+    ).trim();
+    if (!email || !sellerId) throw new Error("Faltan el correo o el ID del vendedor aprobado.");
+
+    try {
+      MailApp.sendEmail({
+        to: email,
+        subject: "Tu cuenta de vendedor est\u00e1 aprobada - Percha&Co",
+        body: "Hola " + name + ",\n\n" +
+          "Tu cuenta de vendedor de Percha&Co ha sido aprobada.\n" +
+          "Tu ID de vendedor es " + sellerId + ".\n\n" +
+          "Entra en la tienda de Percha&Co y abre \"Acceso vendedores\". " +
+          "Solicita un c\u00f3digo con el correo de esta cuenta para cargar tus productos y consultar su estado. " +
+          "Las publicaciones quedan pendientes de revisi\u00f3n antes de mostrarse en la tienda.\n\n" +
+          "Si necesitas ayuda, responde a este correo o escr\u00edbenos por WhatsApp.\n\n" +
+          "El equipo de Percha&Co",
+        name: "Percha&Co",
+        replyTo: STORE_CONTACT_EMAIL
+      });
+    } catch (mailError) {
+      console.error("No se pudo enviar el correo de bienvenida al vendedor " + sellerId + ".", mailError);
+      return false;
+    }
+    sheet.getRange(rowNumber, welcomeCol).setValue(new Date());
+    return true;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function enviarBienvenidaSeleccionada() {
+  exigirPropietario_();
+  var sheet = SpreadsheetApp.getActiveSheet();
+  var range = sheet.getActiveRange();
+  if (!range || sheet.getName() !== "VENDEDORES_MKP" || range.getRow() < 2) {
+    throw new Error("Selecciona una fila de vendedor en VENDEDORES_MKP.");
+  }
+
+  var headers = asegurarColumnasRevisionVendedor_(sheet);
+  var rowNumber = range.getRow();
+  var active = String(
+    sheet.getRange(rowNumber, indiceColumna_(headers, "Activo") + 1).getValue() || ""
+  ).trim().toLowerCase();
+  var payment = String(
+    sheet.getRange(rowNumber, indiceColumna_(headers, "Estado_pago") + 1).getValue() || ""
+  ).trim().toLowerCase();
+  if (["si", "sí", "true", "activo"].indexOf(active) < 0) {
+    throw new Error("Solo se puede enviar la bienvenida a una cuenta activa.");
+  }
+  if (payment !== "aprobado" && payment !== "no_requerido") {
+    throw new Error("La cuenta todavía no está aprobada para recibir la bienvenida.");
+  }
+
+  var welcomeCol = indiceColumna_(headers, "Fecha_Bienvenida") + 1;
+  if (sheet.getRange(rowNumber, welcomeCol).getValue()) {
+    SpreadsheetApp.getActiveSpreadsheet().toast(
+      "La bienvenida ya consta como enviada.",
+      "Percha & Co.",
+      8
+    );
+    return;
+  }
+
+  var sent = enviarBienvenidaVendedor_(sheet, headers, rowNumber);
+  SpreadsheetApp.getActiveSpreadsheet().toast(
+    sent ? "Correo de bienvenida enviado." : "No se pudo enviar; revisa las ejecuciones.",
+    "Percha & Co.",
+    8
+  );
+}
+
+function exigirPropietario_() {
+  if (emailActivo_() !== emailPropietario_()) {
+    throw new Error("Solo la tienda principal puede publicar o reemplazar las imágenes.");
+  }
+}
+
+function permisoImagenProducto_(sheet, rowNumber) {
+  var email = emailActivo_();
+  if (email === emailPropietario_()) {
+    return { role: "owner", email: email };
+  }
+
+  var headers = leerEncabezados_(sheet);
+  var sellerId = String(
+    sheet.getRange(rowNumber, indiceColumna_(headers, "ID_Vendedor") + 1).getValue() || ""
+  ).trim();
+  if (!sellerId || obtenerEmailVendedor(
+    SpreadsheetApp.getActiveSpreadsheet(),
+    sellerId
+  ).trim().toLowerCase() !== email) {
+    throw new Error("Solo puedes solicitar cambios para tus propios productos usando el correo registrado.");
+  }
+  var seller = obtenerMapaVendedores_()[sellerId];
+  if (!seller || !seller.approved) {
+    throw new Error("La cuenta de vendedor debe estar aprobada y activa para solicitar cambios.");
+  }
+  return { role: "seller", email: email, sellerId: sellerId };
+}
+
+function abrirCargaImagenesProducto() {
+  var sheet = SpreadsheetApp.getActiveSheet();
+  if (!esHojaCatalogo_(sheet)) {
+    throw new Error("Selecciona una fila de la hoja del catálogo para cargar imágenes.");
+  }
+  var activeRange = sheet.getActiveRange();
+  if (!activeRange) throw new Error("Selecciona primero la fila de un producto.");
+  var rowNumber = activeRange.getRow();
+  if (rowNumber < 2) {
+    throw new Error("Selecciona la fila de un producto, no los encabezados.");
+  }
+
+  var permission = permisoImagenProducto_(sheet, rowNumber);
+  var headers = leerEncabezados_(sheet);
+  var nameCol = indiceColumna_(headers, "Producto");
+  var imageCol = indiceColumna_(headers, "Image_URL");
+  var productName = String(sheet.getRange(rowNumber, nameCol + 1).getDisplayValue() || "").trim();
+  if (!productName) throw new Error("La fila seleccionada no tiene nombre de producto.");
+
+  var imageCell = sheet.getRange(rowNumber, imageCol + 1);
+  var imageCount = referenciasImagen_(imageCell, imageCell.getValue()).length;
+  var maxImages = maximoImagenesProducto_(sheet, rowNumber);
+  var template = HtmlService.createTemplateFromFile("ProductImageUploader");
+  template.rowNumber = rowNumber;
+  template.productName = productName;
+  template.imageCount = imageCount;
+  template.maxImages = maxImages;
+  template.isFeatured = maxImages === MAX_FEATURED_PRODUCT_IMAGES;
+  template.isStoreOwner = permission.role === "owner";
+  SpreadsheetApp.getUi().showModalDialog(
+    template.evaluate().setWidth(460).setHeight(permission.role === "owner" ? 420 : 480),
+    permission.role === "owner" ? "Cargar imágenes del producto" : "Solicitar cambio de imágenes"
+  );
+}
+
+function maximoImagenesProducto_(sheet, rowNumber) {
+  var headers = leerEncabezados_(sheet);
+  var sellerId = String(
+    sheet.getRange(rowNumber, indiceColumna_(headers, "ID_Vendedor") + 1).getValue() || ""
+  ).trim();
+  if (!sellerId) return MAX_PRODUCT_IMAGES;
+
+  var productId = String(
+    sheet.getRange(rowNumber, indiceColumna_(headers, "ID") + 1).getValue() || ""
+  ).trim();
+  var seller = obtenerMapaVendedores_()[sellerId];
+  return seller && seller.approved && seller.featured &&
+    seller.featuredProductId === productId
+    ? MAX_FEATURED_PRODUCT_IMAGES
+    : MAX_PRODUCT_IMAGES;
+}
+
+function protegerImagenesCatalogo() {
+  exigirPropietario_();
+  prepararCarpetasFotosVendedores_();
+  var sheet = obtenerHojaCatalogo_(SpreadsheetApp.getActiveSpreadsheet());
+  var headers = leerEncabezados_(sheet);
+  var imageColumn = indiceColumna_(headers, "Image_URL") + 1;
+  var range = sheet.getRange(2, imageColumn, sheet.getMaxRows() - 1, 1);
+  var description = "Percha & Co.: solo la tienda principal puede editar Image_URL";
+  var protection = sheet.getProtections(SpreadsheetApp.ProtectionType.RANGE).filter(
+    function (item) { return item.getDescription() === description; }
+  )[0];
+
+  if (!protection) protection = range.protect();
+  protection.setDescription(description);
+  protection.setWarningOnly(false);
+  protection.setDomainEdit(false);
+  var ownerEmail = emailPropietario_();
+  var editors = protection.getEditors().filter(function (editor) {
+    return editor.getEmail().toLowerCase() !== ownerEmail;
+  });
+  if (editors.length) protection.removeEditors(editors);
+  protection.addEditor(ownerEmail);
+  SpreadsheetApp.getUi().alert(
+    "Protección aplicada. Solo " + ownerEmail +
+    " puede editar la columna Image_URL; los vendedores deberán enviar una solicitud."
+  );
+}
+
+function hojaSolicitudesImagenes_(spreadsheet) {
+  var name = "SOLICITUDES_CAMBIO_IMAGENES";
+  var sheet = spreadsheet.getSheetByName(name);
+  if (!sheet) {
+    sheet = spreadsheet.insertSheet(name);
+    sheet.appendRow([
+      "Fecha", "ID_Producto", "Producto", "IDs_Propuestas", "Imagenes_Propuestas",
+      "ID_Vendedor", "Email", "Justificacion", "Estado", "Fila_Catalogo",
+      "Fecha_Revision", "Revisado_Por"
+    ]);
+    sheet.setFrozenRows(1);
+  }
+  return sheet;
+}
+
+function aplicarSolicitudImagenSeleccionada() {
+  exigirPropietario_();
+  var requestSheet = SpreadsheetApp.getActiveSheet();
+  if (requestSheet.getName() !== "SOLICITUDES_CAMBIO_IMAGENES") {
+    throw new Error("Abre SOLICITUDES_CAMBIO_IMAGENES y selecciona una solicitud pendiente.");
+  }
+  var rowNumber = requestSheet.getActiveRange().getRow();
+  if (rowNumber < 2) throw new Error("Selecciona una fila de solicitud, no los encabezados.");
+
+  var requestHeaders = leerEncabezados_(requestSheet);
+  var statusCol = indiceColumna_(requestHeaders, "Estado") + 1;
+  var status = String(requestSheet.getRange(rowNumber, statusCol).getValue() || "")
+    .trim().toLowerCase();
+  if (status !== "pendiente") throw new Error("La solicitud seleccionada ya no está pendiente.");
+
+  var productId = String(
+    requestSheet.getRange(rowNumber, indiceColumna_(requestHeaders, "ID_Producto") + 1).getValue() || ""
+  ).trim();
+  var catalogRow = Number(
+    requestSheet.getRange(rowNumber, indiceColumna_(requestHeaders, "Fila_Catalogo") + 1).getValue()
+  );
+  var catalog = obtenerHojaCatalogo_(SpreadsheetApp.getActiveSpreadsheet());
+  if (!Number.isInteger(catalogRow) || catalogRow < 2 || catalogRow > catalog.getLastRow()) {
+    throw new Error("La fila original del producto ya no existe.");
+  }
+  var catalogHeaders = leerEncabezados_(catalog);
+  var currentProductId = String(
+    catalog.getRange(catalogRow, indiceColumna_(catalogHeaders, "ID") + 1).getValue() || ""
+  ).trim();
+  if (currentProductId !== productId) {
+    throw new Error("El producto cambió de fila o de ID. No se aplicó la solicitud.");
+  }
+  var sellerId = String(
+    requestSheet.getRange(rowNumber, indiceColumna_(requestHeaders, "ID_Vendedor") + 1).getValue() || ""
+  ).trim();
+  var productSellerId = String(
+    catalog.getRange(
+      catalogRow,
+      indiceColumna_(catalogHeaders, "ID_Vendedor") + 1
+    ).getValue() || ""
+  ).trim();
+  var sellerEmail = String(
+    requestSheet.getRange(rowNumber, indiceColumna_(requestHeaders, "Email") + 1).getValue() || ""
+  ).trim().toLowerCase();
+  var sellerRecord = obtenerMapaVendedores_()[sellerId];
+  if (!sellerId || sellerId !== productSellerId ||
+      obtenerEmailVendedor(SpreadsheetApp.getActiveSpreadsheet(), sellerId)
+        .trim().toLowerCase() !== sellerEmail ||
+      !sellerRecord || !sellerRecord.approved) {
+    throw new Error("La solicitud ya no corresponde al vendedor propietario del producto.");
+  }
+
+  var idsText = String(
+    requestSheet.getRange(rowNumber, indiceColumna_(requestHeaders, "IDs_Propuestas") + 1).getValue() || ""
+  );
+  var imageIds = idsText.split(/\n/).map(function (id) { return id.trim(); }).filter(Boolean);
+  var maxImages = maximoImagenesProducto_(catalog, catalogRow);
+  if (!imageIds.length || imageIds.length > maxImages) {
+    throw new Error("La solicitud no tiene una cantidad válida de imágenes propuestas.");
+  }
+  var proposalFolder = obtenerCarpetaSolicitudVendedor_(sellerId, sellerEmail);
+  var rootFolder = obtenerCarpetaImagenesProducto_();
+  var proposalFiles = imageIds.map(function (imageId) {
+    if (!/^[A-Za-z0-9_-]{20,}$/.test(imageId)) {
+      throw new Error("La solicitud contiene una referencia de imagen no válida.");
+    }
+    var file = DriveApp.getFileById(imageId);
+    var parents = file.getParents();
+    var belongsToFolder = false;
+    while (parents.hasNext()) {
+      if (parents.next().getId() === proposalFolder.getId()) {
+        belongsToFolder = true;
+        break;
+      }
+    }
+    if (!belongsToFolder || PRODUCT_IMAGE_TYPES.indexOf(file.getMimeType()) < 0 ||
+        file.getSize() > MAX_PUBLIC_IMAGE_BYTES) {
+      throw new Error("Una imagen propuesta no pertenece a la carpeta del vendedor o no cumple los requisitos.");
+    }
+    return file;
+  });
+
+  var imageCell = catalog.getRange(
+    catalogRow,
+    indiceColumna_(catalogHeaders, "Image_URL") + 1
+  );
+  var ui = SpreadsheetApp.getUi();
+  var confirmation = ui.alert(
+    "Aprobar cambio de imágenes",
+    "Esta acción reemplazará las imágenes actuales de «" +
+      String(catalog.getRange(catalogRow, indiceColumna_(catalogHeaders, "Producto") + 1).getDisplayValue()) +
+      "» por las fotos propuestas. ¿Quieres continuar?",
+    ui.ButtonSet.YES_NO
+  );
+  if (confirmation !== ui.Button.YES) return;
+
+  var approvedImages = [];
+  try {
+    proposalFiles.forEach(function (file) {
+      var copy = file.makeCopy(file.getName(), rootFolder);
+      approvedImages.push({ name: copy.getName(), url: copy.getUrl() });
+    });
+
+    var text = approvedImages.map(function (image) { return image.name; }).join("\n");
+    var richText = SpreadsheetApp.newRichTextValue().setText(text);
+    var offset = 0;
+    approvedImages.forEach(function (image, index) {
+      var end = offset + image.name.length;
+      richText.setLinkUrl(offset, end, image.url);
+      offset = end + (index < approvedImages.length - 1 ? 1 : 0);
+    });
+    imageCell.setRichTextValue(richText.build());
+    requestSheet.getRange(rowNumber, statusCol).setValue("Aprobada");
+    requestSheet.getRange(
+      rowNumber,
+      indiceColumna_(requestHeaders, "Fecha_Revision") + 1
+    ).setValue(new Date());
+    requestSheet.getRange(
+      rowNumber,
+      indiceColumna_(requestHeaders, "Revisado_Por") + 1
+    ).setValue(emailActivo_());
+  } catch (error) {
+    approvedImages.forEach(function (image) {
+      var id = extraerIdDrive_(image.url);
+      if (id) DriveApp.getFileById(id).setTrashed(true);
+    });
+    throw error;
+  }
 }
 
 function doGet(e) {
@@ -83,17 +848,35 @@ function doPost(e) {
     }
 
     var data = JSON.parse(e.postData.contents);
-    if (data.accion !== "registrarVendedor") {
-      return jsonOutput_({ status: "error", message: "Acción no válida." });
+    if (data.accion === "registrarVendedor") {
+      var registration = registrarVendedor(data);
+      return jsonOutput_({
+        status: "success",
+        idVendedor: registration.idVendedor,
+        emailEnviado: registration.emailEnviado,
+        avisoTiendaEnviado: registration.avisoTiendaEnviado,
+        importe: registration.importe
+      });
     }
-
-    var result = registrarVendedor(data);
-    return jsonOutput_({
-      status: "success",
-      idVendedor: result.idVendedor,
-      emailEnviado: result.emailEnviado,
-      importe: result.importe
-    });
+    if (data.accion === "solicitarCodigoAccesoVendedor") {
+      return jsonOutput_(solicitarCodigoAccesoVendedor(data.email));
+    }
+    if (data.accion === "verificarCodigoAccesoVendedor") {
+      return jsonOutput_(verificarCodigoAccesoVendedor(data.email, data.code));
+    }
+    if (data.accion === "listarProductosVendedor") {
+      return jsonOutput_(listarProductosVendedor(data.token));
+    }
+    if (data.accion === "subirImagenProductoVendedor") {
+      return jsonOutput_(subirImagenProductoVendedor(data.token, data.file));
+    }
+    if (data.accion === "cancelarCargaProductoVendedor") {
+      return jsonOutput_(cancelarCargaProductoVendedor(data.token, data.images));
+    }
+    if (data.accion === "crearProductoVendedor") {
+      return jsonOutput_(crearProductoVendedor(data.token, data.product));
+    }
+    return jsonOutput_({ status: "error", message: "Acción no válida." });
   } catch (error) {
     console.error("Error en doPost:", error);
     return jsonOutput_({
@@ -130,6 +913,34 @@ function leerEncabezados_(sheet) {
   return sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0];
 }
 
+function tieneEncabezadosCatalogo_(sheet) {
+  if (!sheet || sheet.getLastColumn() < 1) return false;
+  var headers = leerEncabezados_(sheet).map(normalizarEncabezado_);
+  return [
+    "producto", "precioventa", "imageurl", "id", "categoria",
+    "descripcion", "activo", "idvendedor"
+  ].every(function (header) {
+    return headers.indexOf(header) >= 0;
+  });
+}
+
+function esHojaCatalogo_(sheet) {
+  return Boolean(sheet) &&
+    (sheet.getName() === "Catalogo" || tieneEncabezadosCatalogo_(sheet));
+}
+
+function obtenerHojaCatalogo_(spreadsheet) {
+  var namedSheet = spreadsheet.getSheetByName("Catalogo");
+  if (namedSheet && tieneEncabezadosCatalogo_(namedSheet)) return namedSheet;
+
+  var matches = spreadsheet.getSheets().filter(tieneEncabezadosCatalogo_);
+  if (matches.length === 1) return matches[0];
+  if (matches.length > 1) {
+    throw new Error("Hay varias hojas con encabezados de catálogo. Renombra una como Catalogo.");
+  }
+  throw new Error("No se encontró la hoja Catalogo ni una hoja con sus encabezados.");
+}
+
 function asignarCelda_(sheet, headers, rowNumber, headerName, value) {
   sheet.getRange(rowNumber, indiceColumna_(headers, headerName) + 1).setValue(value);
 }
@@ -143,6 +954,10 @@ function extraerIdDrive_(value) {
 }
 
 function referenciaImagen_(cell, rawValue) {
+  return referenciasImagen_(cell, rawValue)[0] || "";
+}
+
+function referenciasImagen_(cell, rawValue) {
   var richText = cell.getRichTextValue();
   var candidates = [];
 
@@ -153,19 +968,28 @@ function referenciaImagen_(cell, rawValue) {
       var runLink = run.getLinkUrl();
       if (runLink) candidates.push(runLink);
     });
+    candidates.push(richText.getText());
   }
 
   candidates.push(String(rawValue || ""));
-
+  var references = [];
   for (var i = 0; i < candidates.length; i++) {
-    var driveId = extraerIdDrive_(candidates[i]);
-    if (driveId) return "drive:" + driveId;
+    String(candidates[i] || "").split(/[\n\r]+/).forEach(function (candidate) {
+      var value = candidate.trim();
+      if (!value) return;
+      var driveId = extraerIdDrive_(value);
+      if (driveId) {
+        references.push("drive:" + driveId);
+      } else if (/^drive:[A-Za-z0-9_-]{20,}$/.test(value)) {
+        references.push(value);
+      } else if (/^https?:\/\//i.test(value)) {
+        references.push(value);
+      }
+    });
   }
-
-  var value = String(rawValue || "").trim();
-  if (/^https?:\/\//i.test(value)) return value;
-  if (/^drive:[A-Za-z0-9_-]{20,}$/.test(value)) return value;
-  return "";
+  return references.filter(function (reference, index) {
+    return references.indexOf(reference) === index;
+  }).slice(0, MAX_FEATURED_PRODUCT_IMAGES);
 }
 
 function convertirPrecio_(value) {
@@ -230,8 +1054,7 @@ function obtenerMapaVendedores_() {
 
 function obtenerProductosPublicos_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("Catalogo");
-  if (!sheet) throw new Error("No se encontró la hoja Catalogo.");
+  var sheet = obtenerHojaCatalogo_(ss);
 
   var lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
@@ -261,7 +1084,7 @@ function obtenerProductosPublicos_() {
     var seller = sellerId ? sellers[sellerId] : null;
     if (sellerId && seller && !seller.approved) return;
 
-    var image = referenciaImagen_(
+    var images = referenciasImagen_(
       sheet.getRange(index + 2, col.image + 1),
       row[col.image]
     );
@@ -272,7 +1095,7 @@ function obtenerProductosPublicos_() {
       price: convertirPrecio_(row[col.price]),
       category: String(row[col.category] || "").trim().toLowerCase(),
       description: String(row[col.description] || ""),
-      images: image ? [image] : [],
+      images: images,
       sizes: sizesText
         ? sizesText.split(/[,;\n]/).map(function (size) {
             return size.trim();
@@ -289,6 +1112,305 @@ function obtenerProductosPublicos_() {
   });
 
   return products;
+}
+
+function obtenerCarpetaImagenesProducto_() {
+  var properties = PropertiesService.getScriptProperties();
+  var folderId = properties.getProperty("PRODUCT_IMAGES_FOLDER_ID");
+  if (folderId) {
+    var configuredFolder = DriveApp.getFolderById(folderId);
+    if (configuredFolder.getName() !== "IMAGENES_PRODUCTOS" ||
+        configuredFolder.getSharingAccess() !== DriveApp.Access.PRIVATE) {
+      throw new Error("PRODUCT_IMAGES_FOLDER_ID no corresponde a IMAGENES_PRODUCTOS.");
+    }
+    return configuredFolder;
+  }
+
+  var folder = DriveApp.createFolder("IMAGENES_PRODUCTOS");
+  properties.setProperty("PRODUCT_IMAGES_FOLDER_ID", folder.getId());
+  return folder;
+}
+
+function nombreCarpetaSolicitud_(sellerId) {
+  if (!/^[A-Za-z0-9_-]+$/.test(String(sellerId || ""))) {
+    throw new Error("El ID del vendedor no es válido para preparar su carpeta.");
+  }
+  return "SOLICITUD_" + sellerId;
+}
+
+function obtenerCarpetaSolicitudVendedor_(sellerId, sellerEmail) {
+  var root = obtenerCarpetaImagenesProducto_();
+  var folderName = nombreCarpetaSolicitud_(sellerId);
+  var folders = root.getFoldersByName(folderName);
+  if (!folders.hasNext()) {
+    throw new Error("La tienda debe preparar primero la carpeta de imágenes del vendedor.");
+  }
+  var folder = folders.next();
+  if (folders.hasNext()) {
+    throw new Error("Hay carpetas duplicadas para el vendedor " + sellerId + ".");
+  }
+  if (sellerEmail) {
+    var hasSellerAccess = folder.getEditors().some(function (editor) {
+      return editor.getEmail().trim().toLowerCase() === sellerEmail.trim().toLowerCase();
+    });
+    if (!hasSellerAccess) {
+      throw new Error("La carpeta de propuestas no está habilitada para este correo. Contacta con la tienda.");
+    }
+  }
+  return folder;
+}
+
+function prepararCarpetasFotosVendedores_() {
+  var root = obtenerCarpetaImagenesProducto_();
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sellers = spreadsheet.getSheetByName("VENDEDORES_MKP");
+  if (!sellers || sellers.getLastRow() < 2) return;
+
+  var headers = leerEncabezados_(sellers);
+  var idCol = indiceColumna_(headers, "ID_Vendedor");
+  var emailCol = indiceColumna_(headers, "Email");
+  var rows = sellers.getRange(2, 1, sellers.getLastRow() - 1, headers.length).getValues();
+  var ownerEmail = emailPropietario_();
+  var approvedSellers = obtenerMapaVendedores_();
+  rows.forEach(function (row) {
+    var sellerId = String(row[idCol] || "").trim();
+    var sellerEmail = String(row[emailCol] || "").trim().toLowerCase();
+    if (!sellerId || !sellerEmail || !approvedSellers[sellerId] ||
+        !approvedSellers[sellerId].approved) return;
+
+    var folderName = nombreCarpetaSolicitud_(sellerId);
+    var matches = root.getFoldersByName(folderName);
+    var folder = matches.hasNext() ? matches.next() : root.createFolder(folderName);
+    if (matches.hasNext()) {
+      throw new Error("Hay carpetas duplicadas para el vendedor " + sellerId + ".");
+    }
+    var oldEditors = folder.getEditors().filter(function (editor) {
+      return editor.getEmail().trim().toLowerCase() !== ownerEmail &&
+        editor.getEmail().trim().toLowerCase() !== sellerEmail;
+    });
+    if (oldEditors.length) folder.removeEditors(oldEditors);
+    var hasSellerAccess = folder.getEditors().some(function (editor) {
+      return editor.getEmail().trim().toLowerCase() === sellerEmail;
+    });
+    if (!hasSellerAccess) folder.addEditor(sellerEmail);
+  });
+}
+
+function subirImagenProducto(rowNumber, file) {
+  var sheet = SpreadsheetApp.getActiveSheet();
+  if (!esHojaCatalogo_(sheet) || !Number.isInteger(rowNumber) ||
+      rowNumber < 2 || rowNumber > sheet.getLastRow()) {
+    throw new Error("Selecciona un producto válido antes de cargar imágenes.");
+  }
+  var permission = permisoImagenProducto_(sheet, rowNumber);
+  if (!file || typeof file.name !== "string" || typeof file.base64 !== "string") {
+    throw new Error("El archivo seleccionado no es válido.");
+  }
+  if (PRODUCT_IMAGE_TYPES.indexOf(file.mimeType) < 0) {
+    throw new Error("Usa una imagen JPG, PNG, GIF o WebP.");
+  }
+  if (file.base64.length > Math.ceil(MAX_PUBLIC_IMAGE_BYTES / 3) * 4 + 4) {
+    throw new Error("Cada imagen debe pesar como máximo 5 MB.");
+  }
+
+  var bytes = Utilities.base64Decode(file.base64);
+  if (!bytes.length || bytes.length > MAX_PUBLIC_IMAGE_BYTES) {
+    throw new Error("Cada imagen debe pesar más de 0 y como máximo 5 MB.");
+  }
+
+  var safeName = file.name.replace(/[\u0000-\u001f\\/:*?"<>|]/g, "_").slice(0, 150) || "producto";
+  var blob = Utilities.newBlob(bytes, file.mimeType, safeName);
+  var targetFolder = permission.role === "owner"
+    ? obtenerCarpetaImagenesProducto_()
+    : obtenerCarpetaSolicitudVendedor_(permission.sellerId, permission.email);
+  var createdFile = targetFolder.createFile(blob);
+  var uploadToken = Utilities.getUuid();
+  CacheService.getUserCache().put(
+    "product-image-upload:" + createdFile.getId(),
+    uploadToken,
+    1800
+  );
+  return { id: createdFile.getId(), name: createdFile.getName(), token: uploadToken };
+}
+
+function validarCargaImagen_(upload, folder) {
+  if (!upload || typeof upload.id !== "string" ||
+      !/^[A-Za-z0-9_-]{20,}$/.test(upload.id) ||
+      typeof upload.token !== "string" ||
+      CacheService.getUserCache().get("product-image-upload:" + upload.id) !== upload.token) {
+    throw new Error("La carga de una imagen caducó o no pertenece a tu sesión. Vuelve a subirla.");
+  }
+  var file = DriveApp.getFileById(upload.id);
+  var parents = file.getParents();
+  var belongsToFolder = false;
+  while (parents.hasNext()) {
+    if (parents.next().getId() === folder.getId()) {
+      belongsToFolder = true;
+      break;
+    }
+  }
+  if (!belongsToFolder || PRODUCT_IMAGE_TYPES.indexOf(file.getMimeType()) < 0 ||
+      file.getSize() > MAX_PUBLIC_IMAGE_BYTES) {
+    throw new Error("Una imagen no pertenece a la carpeta o no cumple los requisitos.");
+  }
+  return file;
+}
+
+function asociarImagenesProducto(rowNumber, imageUploads, replaceExisting) {
+  var sheet = SpreadsheetApp.getActiveSheet();
+  exigirPropietario_();
+  if (!esHojaCatalogo_(sheet)) {
+    throw new Error("La hoja activa ya no es la hoja del catálogo.");
+  }
+  if (!Number.isInteger(rowNumber) || rowNumber < 2 || rowNumber > sheet.getLastRow()) {
+    throw new Error("La fila seleccionada ya no contiene un producto válido.");
+  }
+  var maxImages = maximoImagenesProducto_(sheet, rowNumber);
+  if (!Array.isArray(imageUploads) || !imageUploads.length ||
+      imageUploads.length > maxImages) {
+    throw new Error("Este producto admite entre 1 y " + maxImages + " imágenes.");
+  }
+
+  var folder = obtenerCarpetaImagenesProducto_();
+  var newReferences = imageUploads.map(function (upload) {
+    var file = validarCargaImagen_(upload, folder);
+    return { id: upload.id, token: upload.token, name: file.getName(), url: file.getUrl() };
+  });
+
+  var headers = leerEncabezados_(sheet);
+  var imageCell = sheet.getRange(
+    rowNumber,
+    indiceColumna_(headers, "Image_URL") + 1
+  );
+  var existingReferences = replaceExisting
+    ? []
+    : referenciasImagen_(imageCell, imageCell.getValue()).map(function (reference) {
+        if (reference.indexOf("drive:") === 0) {
+          var existingFile = DriveApp.getFileById(reference.slice("drive:".length));
+          return {
+            id: reference.slice("drive:".length),
+            name: existingFile.getName(),
+            url: existingFile.getUrl()
+          };
+        }
+        return { name: reference, url: reference };
+      });
+  var combined = existingReferences.concat(newReferences);
+  if (combined.length > maxImages) {
+    throw new Error(
+      "Este producto ya tiene " + existingReferences.length +
+      " imagen(es). Puedes tener hasta " + maxImages +
+      "; selecciona menos fotos o elige reemplazarlas."
+    );
+  }
+
+  var text = combined.map(function (image) { return image.name; }).join("\n");
+  var richText = SpreadsheetApp.newRichTextValue().setText(text);
+  var offset = 0;
+  combined.forEach(function (image, index) {
+    var end = offset + image.name.length;
+    richText.setLinkUrl(offset, end, image.url);
+    offset = end + (index < combined.length - 1 ? 1 : 0);
+  });
+  imageCell.setRichTextValue(richText.build());
+  CacheService.getUserCache().removeAll(imageUploads.map(function (upload) {
+    return "product-image-upload:" + upload.id;
+  }));
+  return { count: combined.length, added: newReferences.length };
+}
+
+function crearSolicitudCambioImagenes(rowNumber, justification, imageUploads) {
+  var catalog = SpreadsheetApp.getActiveSheet();
+  if (!esHojaCatalogo_(catalog) || !Number.isInteger(rowNumber) ||
+      rowNumber < 2 || rowNumber > catalog.getLastRow()) {
+    throw new Error("El producto seleccionado ya no es válido.");
+  }
+  var permission = permisoImagenProducto_(catalog, rowNumber);
+  if (permission.role !== "seller") {
+    throw new Error("La tienda principal puede actualizar las imágenes directamente.");
+  }
+  var reason = String(justification || "").trim();
+  if (reason.length < 10 || reason.length > 1000) {
+    throw new Error("Explica el motivo del cambio con entre 10 y 1000 caracteres.");
+  }
+  var maxImages = maximoImagenesProducto_(catalog, rowNumber);
+  if (!Array.isArray(imageUploads) || !imageUploads.length ||
+      imageUploads.length > maxImages) {
+    throw new Error("Este producto admite entre 1 y " + maxImages + " imágenes propuestas.");
+  }
+
+  var folder = obtenerCarpetaImagenesProducto_();
+  var sellerFolder = obtenerCarpetaSolicitudVendedor_(
+    permission.sellerId,
+    permission.email
+  );
+  var files = imageUploads.map(function (upload) {
+    var file = validarCargaImagen_(upload, sellerFolder);
+    return { id: upload.id, name: file.getName(), url: file.getUrl() };
+  });
+  var headers = leerEncabezados_(catalog);
+  var productName = String(
+    catalog.getRange(rowNumber, indiceColumna_(headers, "Producto") + 1).getDisplayValue() || ""
+  ).trim();
+  var productId = String(
+    catalog.getRange(rowNumber, indiceColumna_(headers, "ID") + 1).getValue() || ""
+  ).trim();
+  if (!productName || !productId) {
+    throw new Error("El producto necesita nombre e ID para registrar la solicitud.");
+  }
+
+  var lock = LockService.getDocumentLock();
+  lock.waitLock(30000);
+  try {
+    var requests = hojaSolicitudesImagenes_(SpreadsheetApp.getActiveSpreadsheet());
+    var requestRow = requests.getLastRow() + 1;
+    requests.getRange(requestRow, 1, 1, 12).setValues([[
+      new Date(),
+      productId,
+      productName,
+      files.map(function (file) { return file.id; }).join("\n"),
+      files.map(function (file) { return file.name; }).join("\n"),
+      permission.sellerId,
+      permission.email,
+      reason,
+      "Pendiente",
+      rowNumber,
+      "",
+      ""
+    ]]);
+    var text = files.map(function (file) { return file.name; }).join("\n");
+    var richText = SpreadsheetApp.newRichTextValue().setText(text);
+    var offset = 0;
+    files.forEach(function (file, index) {
+      var end = offset + file.name.length;
+      richText.setLinkUrl(offset, end, file.url);
+      offset = end + (index < files.length - 1 ? 1 : 0);
+    });
+    requests.getRange(requestRow, 5).setRichTextValue(richText.build());
+  } finally {
+    lock.releaseLock();
+  }
+
+  CacheService.getUserCache().removeAll(imageUploads.map(function (upload) {
+    return "product-image-upload:" + upload.id;
+  }));
+  return { status: "Pendiente", count: files.length };
+}
+
+function eliminarImagenesCarga(rowNumber, imageUploads) {
+  if (!Array.isArray(imageUploads) || !imageUploads.length) return;
+  var sheet = SpreadsheetApp.getActiveSheet();
+  if (!esHojaCatalogo_(sheet)) throw new Error("No se encontró la hoja del producto.");
+  var permission = permisoImagenProducto_(sheet, rowNumber);
+  var folder = permission.role === "owner"
+    ? obtenerCarpetaImagenesProducto_()
+    : obtenerCarpetaSolicitudVendedor_(permission.sellerId, permission.email);
+  var cache = CacheService.getUserCache();
+  imageUploads.forEach(function (upload) {
+    var file = validarCargaImagen_(upload, folder);
+    file.setTrashed(true);
+    cache.remove("product-image-upload:" + upload.id);
+  });
 }
 
 function obtenerImagenPublica_(imageId) {
@@ -407,6 +1529,7 @@ function registrarVendedor(datos) {
   var sellerId = "V-" + Utilities.getUuid();
   var documentId = "";
   try {
+    asegurarColumnasRevisionVendedor_(sheet);
     if (
       destaque !== "Ninguno" &&
       contarPlazasDestaque_(sheet) >= MAX_FEATURED_SELLERS
@@ -434,7 +1557,9 @@ function registrarVendedor(datos) {
       fechafindestaque: "",
       avisorenovacion: "",
       fechacancelacion: "",
-      idproductodestacado: ""
+      idproductodestacado: "",
+      estadorevision: "Pendiente",
+      fechabienvenida: ""
     };
     var row = headers.map(function (header) {
       var key = normalizarEncabezado_(header);
@@ -495,9 +1620,11 @@ function registrarVendedor(datos) {
     body = "Hola " + nombre + ",\n\n" +
       "Recibimos tu solicitud. Plan: Freemium, sin destaque y sin coste.\n" +
       "Tu ID de vendedor es " + sellerId + ".\n\n" +
-      "La solicitud queda pendiente de revisión manual. No tienes que hacer ningún pago.";
+      "No tienes que hacer ningún pago. La tienda la revisará y, si no hay incidencias, " +
+      "se aprobará automáticamente en un máximo de 48 horas.";
     emailIntro = "Hemos recibido tu solicitud para el plan Freemium.";
-    statusMessage = "Tu solicitud queda pendiente de revisión manual. No tienes que hacer ningún pago.";
+    statusMessage = "No tienes que hacer ningún pago. La tienda revisará tu solicitud y, si no hay incidencias, " +
+      "se aprobará automáticamente en un máximo de 48 horas.";
   }
 
   var rowsHtml = detailRows.map(function (row) {
@@ -547,7 +1674,34 @@ function registrarVendedor(datos) {
     console.error("La solicitud se guardó, pero no se pudo enviar el correo.", mailError);
   }
 
-  return { idVendedor: sellerId, emailEnviado: emailSent, importe: importe };
+  var storeNoticeSent = false;
+  try {
+    MailApp.sendEmail({
+      to: STORE_CONTACT_EMAIL,
+      subject: "Nueva solicitud de vendedor — Percha&Co",
+      body: "Se recibió una nueva solicitud de vendedor.\n\n" +
+        "Nombre: " + nombre + "\n" +
+        "Correo: " + email + "\n" +
+        "WhatsApp: " + whatsapp + "\n" +
+        "Plan: " + planLabel + "\n" +
+        "Destaque: " + featuredLabel + "\n" +
+        "Importe inicial: " + importe.toFixed(2).replace(".", ",") + " €\n" +
+        "ID de vendedor: " + sellerId + "\n\n" +
+        "Revisa la solicitud en VENDEDORES_MKP. La cuenta no se activa hasta ser aprobada.",
+      name: "Percha&Co",
+      replyTo: STORE_CONTACT_EMAIL
+    });
+    storeNoticeSent = true;
+  } catch (mailError) {
+    console.error("La solicitud se guardó, pero no se pudo avisar a la tienda.", mailError);
+  }
+
+  return {
+    idVendedor: sellerId,
+    emailEnviado: emailSent,
+    avisoTiendaEnviado: storeNoticeSent,
+    importe: importe
+  };
 }
 
 function guardarDocumentoDni_(sellerId, file) {
@@ -617,8 +1771,8 @@ function guardarDocumentoDni_(sellerId, file) {
 function puedeSubirProducto(sellerId) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sellers = ss.getSheetByName("VENDEDORES_MKP");
-  var catalog = ss.getSheetByName("Catalogo");
-  if (!sellers || !catalog) throw new Error("Falta una hoja necesaria.");
+  if (!sellers) throw new Error("Falta una hoja necesaria.");
+  var catalog = obtenerHojaCatalogo_(ss);
 
   var sellerHeaders = leerEncabezados_(sellers);
   var sellerRows = sellers.getLastRow() > 1
@@ -661,8 +1815,7 @@ function puedeSubirProducto(sellerId) {
 }
 
 function aprobarProductosPendientes48Horas() {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Catalogo");
-  if (!sheet) throw new Error("No se encontró la hoja Catalogo.");
+  var sheet = obtenerHojaCatalogo_(SpreadsheetApp.getActiveSpreadsheet());
   if (sheet.getLastRow() < 2) return;
 
   var headers = leerEncabezados_(sheet);
@@ -681,6 +1834,60 @@ function aprobarProductosPendientes48Horas() {
     ) {
       sheet.getRange(index + 2, statusCol + 1).setValue("Activo_Auto");
     }
+  });
+}
+
+function aprobarVendedoresFreemium48Horas_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("VENDEDORES_MKP");
+  if (!sheet || sheet.getLastRow() < 2) return;
+
+  var headers = asegurarColumnasRevisionVendedor_(sheet);
+  var rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).getValues();
+  var activeCol = indiceColumna_(headers, "Activo");
+  var paymentCol = indiceColumna_(headers, "Estado_pago");
+  var planCol = indiceColumna_(headers, "Plan");
+  var registeredCol = indiceColumna_(headers, "Fecha_Registro");
+  var reviewCol = indiceColumna_(headers, "Estado_Revision");
+  var now = Date.now();
+
+  rows.forEach(function (row, index) {
+    var active = String(row[activeCol] || "").trim().toLowerCase();
+    var payment = String(row[paymentCol] || "").trim().toLowerCase();
+    if (
+      ["si", "sí", "true", "activo"].indexOf(active) >= 0 ||
+      payment !== "no_requerido" ||
+      String(row[planCol] || "").trim() !== "Freemium" ||
+      String(row[reviewCol] || "").trim().toLowerCase() !== "pendiente" ||
+      !(row[registeredCol] instanceof Date) ||
+      now - row[registeredCol].getTime() < 48 * 60 * 60 * 1000
+    ) return;
+
+    var rowNumber = index + 2;
+    asignarCelda_(sheet, headers, rowNumber, "Estado_Revision", "Aprobado");
+    asignarCelda_(sheet, headers, rowNumber, "Activo", "si");
+    enviarBienvenidaVendedor_(sheet, headers, rowNumber);
+  });
+}
+
+function enviarBienvenidasAprobados_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("VENDEDORES_MKP");
+  if (!sheet || sheet.getLastRow() < 2) return;
+
+  var headers = asegurarColumnasRevisionVendedor_(sheet);
+  var rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).getValues();
+  var activeCol = indiceColumna_(headers, "Activo");
+  var paymentCol = indiceColumna_(headers, "Estado_pago");
+  var welcomeCol = indiceColumna_(headers, "Fecha_Bienvenida");
+  rows.forEach(function (row, index) {
+    var active = String(row[activeCol] || "").trim().toLowerCase();
+    var payment = String(row[paymentCol] || "").trim().toLowerCase();
+    if (
+      ["si", "sí", "true", "activo"].indexOf(active) < 0 ||
+      (payment !== "aprobado" && payment !== "no_requerido") ||
+      row[welcomeCol]
+    ) return;
+
+    enviarBienvenidaVendedor_(sheet, headers, index + 2);
   });
 }
 
@@ -715,6 +1922,13 @@ function activarPagoVendedor_(sheet, headers, rowNumber) {
     sheet.getRange(rowNumber, indiceColumna_(headers, "Estado_pago") + 1).getValue() || ""
   ).trim().toLowerCase();
   if (payment !== "aprobado") return;
+  headers = asegurarColumnasRevisionVendedor_(sheet);
+  var review = String(
+    sheet.getRange(rowNumber, indiceColumna_(headers, "Estado_Revision") + 1).getValue() || ""
+  ).trim().toLowerCase();
+  if (review === "rechazado") {
+    throw new Error("No se puede activar una solicitud rechazada.");
+  }
 
   var now = new Date();
   var featured = String(
@@ -731,7 +1945,9 @@ function activarPagoVendedor_(sheet, headers, rowNumber) {
     asignarCelda_(sheet, headers, rowNumber, "Fecha_Pago", now);
     asignarCelda_(sheet, headers, rowNumber, "Estado_Destaque", "Sin_destaque");
   }
+  asignarCelda_(sheet, headers, rowNumber, "Estado_Revision", "Aprobado");
   asignarCelda_(sheet, headers, rowNumber, "Activo", "si");
+  enviarBienvenidaVendedor_(sheet, headers, rowNumber);
 }
 
 function procesarEdicionInstalable(e) {
@@ -745,10 +1961,29 @@ function procesarEdicionInstalable(e) {
   var now = new Date();
 
   if (sheet.getName() === "VENDEDORES_MKP") {
+    headers = asegurarColumnasRevisionVendedor_(sheet);
     var paymentCol = indiceColumna_(headers, "Estado_pago");
     var activeCol = indiceColumna_(headers, "Activo");
+    var reviewCol = indiceColumna_(headers, "Estado_Revision");
 
-    if (editedColumn === paymentCol) {
+    if (editedColumn === reviewCol) {
+      var review = String(e.range.getValue() || "").trim().toLowerCase();
+      if (review === "rechazado") {
+        asignarCelda_(sheet, headers, rowNumber, "Activo", "no");
+        asignarCelda_(sheet, headers, rowNumber, "Estado_Destaque", "Cancelado");
+        asignarCelda_(sheet, headers, rowNumber, "Fecha_Cancelacion", now);
+      } else if (review === "aprobado") {
+        var reviewPayment = String(
+          sheet.getRange(rowNumber, paymentCol + 1).getValue() || ""
+        ).trim().toLowerCase();
+        if (reviewPayment === "no_requerido") {
+          asignarCelda_(sheet, headers, rowNumber, "Activo", "si");
+          enviarBienvenidaVendedor_(sheet, headers, rowNumber);
+        } else if (reviewPayment === "aprobado") {
+          activarPagoVendedor_(sheet, headers, rowNumber);
+        }
+      }
+    } else if (editedColumn === paymentCol) {
       var payment = String(e.range.getValue() || "").trim().toLowerCase();
       if (payment === "aprobado") {
         activarPagoVendedor_(sheet, headers, rowNumber);
@@ -769,17 +2004,25 @@ function procesarEdicionInstalable(e) {
         var paymentValue = String(
           sheet.getRange(rowNumber, paymentCol + 1).getValue() || ""
         ).trim().toLowerCase();
+        var reviewValue = String(
+          sheet.getRange(rowNumber, reviewCol + 1).getValue() || ""
+        ).trim().toLowerCase();
+        if (reviewValue === "rechazado") {
+          throw new Error("No se puede activar una solicitud rechazada.");
+        }
         if (paymentValue === "no_requerido") {
           asignarCelda_(sheet, headers, rowNumber, "Fecha_Pago", "");
         } else if (paymentValue !== "aprobado") {
           throw new Error("Solo se puede activar manualmente una cuenta Freemium sin pago.");
         }
+        asignarCelda_(sheet, headers, rowNumber, "Estado_Revision", "Aprobado");
+        enviarBienvenidaVendedor_(sheet, headers, rowNumber);
       }
     }
     return;
   }
 
-  if (sheet.getName() !== "Catalogo") return;
+  if (!esHojaCatalogo_(sheet)) return;
   var productStatusCol = indiceColumna_(headers, "Activo");
   if (editedColumn !== productStatusCol) return;
 
@@ -952,6 +2195,8 @@ function borrarDocumentosCancelados_() {
 
 function procesarAutomatizacionesCadaHora() {
   aprobarProductosPendientes48Horas();
+  aprobarVendedoresFreemium48Horas_();
+  enviarBienvenidasAprobados_();
   procesarSolicitudesVencidas_();
   procesarVencimientosDestaque_();
   enviarAvisosRenovacion_();
