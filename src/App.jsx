@@ -8,6 +8,11 @@ const PAGE_SIZE = 12
 const CATEGORIES = [['todos', 'Todos'], ['ropa', 'Ropa'], ['productos', 'Productos']]
 const FAV_KEY = 'percha-favoritos'
 const MAX_WA_ITEMS = 20
+const SELLER_PLANS = [
+  { id: 'Freemium', title: 'Freemium', limit: 'Hasta 5 productos', price: 0, featured: 'Ninguno' },
+  { id: 'Plus', title: 'Plus', limit: 'Hasta 10 productos', price: 9.99, featured: '1_Mes' },
+  { id: 'Pro', title: 'Pro', limit: 'Hasta 20 productos', price: 14.99, featured: '1_Mes', popular: true },
+]
 const money = new Intl.NumberFormat('es-ES', { style: 'currency', currency: CURRENCY })
 const PHONE_RE = /^\d{8,15}$/
 // Si el producto tiene vendedor con un WhatsApp válido, se usa su número; si no, el de la tienda.
@@ -112,8 +117,36 @@ function ThemeIcon({ dark }) {
 function WhatsAppIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <path d="M20.4 11.8a8.4 8.4 0 0 1-12.4 7.4L3 20l.9-4.8a8.4 8.4 0 1 1 16.5-3.4Z" />
-      <path d="M8.2 7.8c.2-.4.4-.4.7-.4h.4c.2 0 .3 0 .4.3l.7 1.7c.1.2 0 .4-.1.5l-.5.6c-.2.2-.2.3-.1.5.3.6.8 1.1 1.3 1.6.6.5 1.1.8 1.6 1 .2.1.4.1.5-.1l.7-.8c.2-.2.3-.2.5-.1l1.6.8c.2.1.3.2.3.3 0 .2-.1 1-.6 1.4-.5.5-1.2.6-1.7.6s-1.1-.2-1.9-.5c-.9-.4-1.9-1.1-2.7-1.9-.8-.8-1.5-1.8-1.9-2.6-.3-.7-.5-1.3-.5-1.8 0-.6.3-1 .6-1.3Z" />
+      <circle cx="12" cy="12" r="11.5" fill="currentColor" />
+      <path d="M19.2 11.6a7.2 7.2 0 0 1-10.7 6.3L4.4 19l1.1-3.9a7.2 7.2 0 1 1 13.7-3.5Z" fill="none" stroke="#fff" strokeWidth="1.5" strokeLinejoin="round" />
+      <path d="M8.7 8.2c.2-.3.3-.3.5-.3h.4c.2 0 .3.1.4.3l.6 1.4c.1.2 0 .3-.1.5l-.4.5c-.1.1-.2.2-.1.4.3.5.7 1 1.1 1.3.5.4 1 .7 1.4.9.2.1.3.1.5-.1l.6-.7c.1-.2.3-.2.5-.1l1.3.6c.2.1.3.2.3.3 0 .2-.1.8-.5 1.1-.4.4-1 .5-1.4.5-.5 0-1-.2-1.6-.4-.8-.3-1.6-.9-2.3-1.6-.7-.7-1.3-1.5-1.6-2.2-.3-.6-.4-1.1-.4-1.5 0-.5.2-.8.5-1.1Z" fill="none" stroke="#fff" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
+}
+
+function SocialIcon({ name }) {
+  if (name === 'WhatsApp') return <WhatsAppIcon />
+  if (name === 'Instagram') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <rect x="5" y="5" width="14" height="14" rx="4" fill="none" stroke="#fff" strokeWidth="1.8" />
+        <circle cx="12" cy="12" r="3.4" fill="none" stroke="#fff" strokeWidth="1.8" />
+        <circle cx="16.7" cy="7.5" r="1.1" fill="#fff" />
+      </svg>
+    )
+  }
+  if (name === 'Facebook') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+        <circle cx="12" cy="12" r="12" fill="currentColor" />
+        <path d="M13.5 21v-8h2.7l.4-3h-3.1V8.1c0-.9.3-1.6 1.6-1.6h1.7V3.8c-.3 0-1.3-.1-2.5-.1-2.5 0-4.2 1.5-4.2 4.3V10H7.3v3h2.8v8h3.4Z" fill="#fff" />
+      </svg>
+    )
+  }
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <circle cx="12" cy="12" r="12" fill="currentColor" />
+      <path d="M7 6l10 12M17 6 7 18" stroke="#fff" strokeWidth="2" />
     </svg>
   )
 }
@@ -298,6 +331,13 @@ function CookieBanner({ onInfo }) {
 }
 
 function Footer({ onLegal }) {
+  const socials = [
+    { name: 'Instagram', url: SOCIAL.Instagram },
+    { name: 'WhatsApp', url: `https://wa.me/${WHATSAPP_NUMBER}` },
+    { name: 'X', url: SOCIAL.X },
+    { name: 'Facebook', url: SOCIAL.Facebook },
+  ]
+
   return (
     <footer className="footer">
       <div className="footer-cols">
@@ -315,10 +355,19 @@ function Footer({ onLegal }) {
         </section>
         <section>
           <h3>Redes</h3>
-          <ul>
-            {Object.entries(SOCIAL).map(([name, url]) => (
+          <ul className="social-list">
+            {socials.map(({ name, url }) => (
               <li key={name}>
-                {url ? <a href={url} target="_blank" rel="noopener noreferrer">{name}</a> : <span className="soon">{name} (próximamente)</span>}
+                {url ? (
+                  <a className={`social-link social-${name.toLowerCase()}`} href={url} target="_blank" rel="noopener noreferrer" aria-label={name} title={name}>
+                    <SocialIcon name={name} />
+                  </a>
+                ) : (
+                  <span className={`social-link social-${name.toLowerCase()} is-disabled`} aria-label={`${name}, próximamente`} title={`${name} próximamente`}>
+                    <SocialIcon name={name} />
+                    <span className="sr-only">{name}, próximamente</span>
+                  </span>
+                )}
               </li>
             ))}
           </ul>
@@ -329,8 +378,47 @@ function Footer({ onLegal }) {
   )
 }
 
+function SellerPlans({ onBack, onChoose }) {
+  return (
+    <main className="seller-plans">
+      <button className="link registration-back" type="button" onClick={onBack}>← Volver a la tienda</button>
+      <div className="plans-heading">
+        <span className="featured-eyebrow">Crece con Percha &amp; Co.</span>
+        <h2>Elige tu plan para vender</h2>
+        <p>Empieza con el plan que mejor se adapte a tu catálogo. Completarás una única solicitud para cualquiera de las opciones.</p>
+      </div>
+      <div className="plans-grid">
+        {SELLER_PLANS.map((plan) => (
+          <article className={`plan-card${plan.popular ? ' is-popular' : ''}`} key={plan.id}>
+            {plan.popular && <span className="plan-popular">Más elegido</span>}
+            <h3>{plan.title}</h3>
+            <p className="plan-limit">{plan.limit}</p>
+            <p className="plan-price">{plan.price === 0 ? 'Gratis' : <>{money.format(plan.price)}<small> / mes</small></>}</p>
+            <ul>
+              <li>{plan.featured === 'Ninguno' ? 'Sin destaque incluido' : 'Destaque de 1 mes seleccionado'}</li>
+              <li>Contacto directo con tus compradores</li>
+            </ul>
+            {plan.featured !== 'Ninguno' && (
+              <p className="plan-first-total">
+                Primer pago: {money.format(plan.price + 9.99)}
+                <small> Incluye el primer mes de destaque ({money.format(9.99)}). El plan se factura mensualmente.</small>
+              </p>
+            )}
+            {plan.featured === 'Ninguno' && <p className="plan-first-total">Sin pagos ni destaque adicional.</p>}
+            <button className="plan-choose" type="button" onClick={() => onChoose(plan.id, plan.featured)}>
+              Elegir {plan.title}
+            </button>
+          </article>
+        ))}
+      </div>
+      <p className="plans-note">Los destaques son opcionales. En el formulario podrás revisar y cambiar tu selección antes de enviar la solicitud. Precios con IVA incluido.</p>
+    </main>
+  )
+}
+
 export default function App() {
   const [vista, setVista] = useState('catalogo')
+  const [sellerSelection, setSellerSelection] = useState({ plan: 'Freemium', destaque: 'Ninguno' })
   const [products, setProducts] = useState(null)
   const [error, setError] = useState(false)
   const [selected, setSelected] = useState(null)
@@ -400,9 +488,14 @@ export default function App() {
     setMenuOpen(false)
     catalogRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
   }
-  const openRegistration = () => {
-    setVista('registro')
+  const openPlans = () => {
+    setVista('planes')
     setMenuOpen(false)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+  const chooseSellerPlan = (plan, destaque) => {
+    setSellerSelection({ plan, destaque })
+    setVista('registro')
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
@@ -424,14 +517,12 @@ export default function App() {
     })
   }
   const favGroups = category === 'favoritos' ? waGroups() : []
-  const contactWa = `https://wa.me/${WHATSAPP_NUMBER}?text=${encodeURIComponent('Hola, quisiera hacer una consulta.')}`
-
   return (
     <>
       <header className="top">
         <h1 className="brand"><img src={base + 'logo.svg'} alt={STORE_NAME} /></h1>
         <div className="header-actions">
-          <button className="seller-entry" onClick={openRegistration}>Vender</button>
+          <button className="seller-entry" onClick={openPlans}>Vende con nosotros</button>
           <button className="theme-toggle" onClick={() => setTheme((t) => t === 'dark' ? 'light' : 'dark')} aria-label={theme === 'dark' ? 'Activar modo claro' : 'Activar modo oscuro'} aria-pressed={theme === 'dark'}>
             <ThemeIcon dark={theme === 'dark'} />
           </button>
@@ -445,13 +536,21 @@ export default function App() {
               <button className="nav-link" key={key} onClick={() => selectMenuCategory(key)}>{label}</button>
             ))}
             <button className="nav-link" onClick={() => selectMenuCategory('favoritos')}>Favoritos</button>
-            <button className="nav-link" onClick={openRegistration}>Vender en Percha&amp;Co</button>
+            <button className="nav-link" onClick={openPlans}>Planes para vendedores</button>
             <button className="nav-link" onClick={() => { setMenuOpen(false); document.getElementById('contacto')?.scrollIntoView({ behavior: 'smooth' }) }}>Contacto</button>
           </nav>
         )}
       </header>
-      {vista === 'registro' ? (
-        <RegistroVendedor onVolver={() => setVista('catalogo')} onLegal={setLegal} />
+      {vista === 'planes' ? (
+        <SellerPlans onBack={() => setVista('catalogo')} onChoose={chooseSellerPlan} />
+      ) : vista === 'registro' ? (
+        <RegistroVendedor
+          key={`${sellerSelection.plan}-${sellerSelection.destaque}`}
+          initialPlan={sellerSelection.plan}
+          initialDestaque={sellerSelection.destaque}
+          onVolver={() => setVista('planes')}
+          onLegal={setLegal}
+        />
       ) : (
       <main ref={catalogRef}>
         {vista === 'catalogo' && featuredProducts.length > 0 && (
@@ -461,7 +560,7 @@ export default function App() {
               <h2 id="featured-title">Destacados</h2>
               <p>Descubre productos seleccionados de nuestros vendedores.</p>
             </div>
-            <ul className="grid featured-grid">
+            <ul className={`grid featured-grid${featuredProducts.length === 1 ? ' is-single' : ''}`}>
               {featuredProducts.map((product) => (
                 <li key={product.id}>
                   <button className="card featured-card" onClick={() => setSelected(product)}>
@@ -523,14 +622,18 @@ export default function App() {
           </ul>
         )}
         <Pagination page={cur} total={totalPages} onChange={goPage} />
+        <section className="seller-callout" aria-labelledby="seller-callout-title">
+          <div>
+            <span className="featured-eyebrow">Tu tienda también puede estar aquí</span>
+            <h2 id="seller-callout-title">¿También quieres vender con nosotros?</h2>
+            <p>Conoce los planes y encuentra el que mejor se adapte a tus productos.</p>
+          </div>
+          <button className="plan-choose" type="button" onClick={openPlans}>Ver planes</button>
+        </section>
       </main>
       )}
       <Footer onLegal={setLegal} />
       <CookieBanner onInfo={() => setLegal('cookies')} />
-      <a className="floating-wa" href={contactWa} target="_blank" rel="noopener noreferrer" aria-label="Consultar por WhatsApp">
-        <WhatsAppIcon />
-        <span></span>
-      </a>
       {showTop && <button className="back-to-top" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} aria-label="Volver arriba">↑</button>}
       {selected && <Detail product={selected} isFav={favs.includes(selected.id)} onToggleFav={() => toggleFav(selected.id)} onClose={() => setSelected(null)} />}
       {legal && <LegalDialog doc={legal} onClose={() => setLegal(null)} />}

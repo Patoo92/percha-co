@@ -30,13 +30,13 @@ function readFile(file) {
   })
 }
 
-export default function RegistroVendedor({ onVolver, onLegal }) {
+export default function RegistroVendedor({ initialPlan, initialDestaque, onVolver, onLegal }) {
   const [form, setForm] = useState({
     nombre: '',
     whatsapp: '',
     email: '',
-    plan: 'Freemium',
-    destaque: 'Ninguno',
+    plan: initialPlan,
+    destaque: initialDestaque,
     consentimiento: false,
   })
   const [documento, setDocumento] = useState(null)
@@ -63,9 +63,6 @@ export default function RegistroVendedor({ onVolver, onLegal }) {
         if (!active) return
         if (result.disponible) {
           setFeaturedAvailability('available')
-          setForm((current) => current.destaque === 'Ninguno'
-            ? { ...current, destaque: '1_Mes' }
-            : current)
         } else {
           setFeaturedAvailability('full')
           setForm((current) => ({ ...current, destaque: 'Ninguno' }))
@@ -155,8 +152,8 @@ export default function RegistroVendedor({ onVolver, onLegal }) {
         nombre: '',
         whatsapp: '',
         email: '',
-        plan: 'Freemium',
-        destaque: featuredAvailability === 'available' ? '1_Mes' : 'Ninguno',
+        plan: initialPlan,
+        destaque: featuredAvailability === 'available' ? initialDestaque : 'Ninguno',
         consentimiento: false,
       })
       const input = document.getElementById('registro-documento')

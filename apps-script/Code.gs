@@ -9,6 +9,39 @@ var FEATURED_PRICES = {
 var MAX_FEATURED_SELLERS = 5;
 var MAX_ID_DOCUMENT_BYTES = 5 * 1024 * 1024;
 var MAX_PUBLIC_IMAGE_BYTES = 5 * 1024 * 1024;
+var STORE_CONTACT_EMAIL = "patoog58@gmail.com";
+var STORE_WHATSAPP_NUMBER = "34600369376";
+var BIZUM_PHONE_NUMBER = "+34 600 369 376";
+
+function escaparHtml_(value) {
+  return String(value).replace(/[&<>"']/g, function (character) {
+    return {
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;"
+    }[character];
+  });
+}
+
+function etiquetaPlan_(plan) {
+  return {
+    Freemium: "Freemium",
+    Plus: "Plus",
+    Pro: "Pro"
+  }[plan] || plan;
+}
+
+function etiquetaDestaque_(destaque) {
+  return {
+    Ninguno: "Sin destaque",
+    "1_Semana": "1 semana",
+    "2_Semanas": "2 semanas",
+    "3_Semanas": "3 semanas",
+    "1_Mes": "1 mes"
+  }[destaque] || destaque;
+}
 
 function doGet(e) {
   try {
@@ -426,24 +459,89 @@ function registrarVendedor(datos) {
 
   var emailSent = false;
   var subject = "Solicitud recibida — Percha&Co";
+  var planLabel = etiquetaPlan_(plan);
+  var featuredLabel = etiquetaDestaque_(destaque);
+  var sellerIdSafe = escaparHtml_(sellerId);
+  var nameSafe = escaparHtml_(nombre);
+  var contactEmailSafe = escaparHtml_(STORE_CONTACT_EMAIL);
+  var whatsappUrl = "https://wa.me/" + STORE_WHATSAPP_NUMBER +
+    "?text=" + encodeURIComponent("Hola Percha&Co, escribo por mi solicitud " + sellerId + ".");
   var body;
+  var emailIntro;
+  var statusMessage;
+  var detailRows = [
+    ["Plan", planLabel],
+    ["Destaque", featuredLabel],
+    ["Total inicial", importe.toFixed(2).replace(".", ",") + " € (IVA incluido)"]
+  ];
+
   if (requiresPayment) {
+    detailRows.push(["Pagar por Bizum", BIZUM_PHONE_NUMBER]);
     body = "Hola " + nombre + ",\n\n" +
-      "Recibimos tu solicitud para el plan " + plan +
-      (destaque !== "Ninguno" ? " y el destaque " + destaque : "") + ".\n" +
-      "Importe total: " + importe.toFixed(2).replace(".", ",") + " € (IVA incluido).\n" +
-      "La solicitud queda reservada durante 24 horas. Para coordinar el Bizum, " +
-      "responde a este correo con tu ID de vendedor: " + sellerId + ".\n\n" +
+      "Recibimos tu solicitud. Aquí tienes el resumen:\n" +
+      "Plan: " + planLabel + "\n" +
+      "Destaque: " + featuredLabel + "\n" +
+      "Total inicial: " + importe.toFixed(2).replace(".", ",") + " € (IVA incluido).\n\n" +
+      "Envía el Bizum al número " + BIZUM_PHONE_NUMBER + " por el importe indicado. " +
+      "La solicitud queda reservada durante 24 horas. Después, responde a este correo o " +
+      "escríbenos por WhatsApp indicando tu ID de vendedor: " + sellerId + ".\n" +
+      "La cuenta se activará al verificar el pago.";
+    emailIntro = "Hemos recibido tu solicitud. Este es el resumen:";
+    statusMessage = "Envía el Bizum al número " + BIZUM_PHONE_NUMBER + " por el importe indicado. " +
+      "Tu solicitud queda reservada durante 24 horas. Después, responde a este correo o " +
+      "escríbenos por WhatsApp indicando tu ID de vendedor. " +
       "La cuenta se activará al verificar el pago.";
   } else {
     body = "Hola " + nombre + ",\n\n" +
-      "Recibimos tu solicitud para el plan Freemium, sin destaque y sin coste.\n" +
-      "La cuenta queda pendiente de revisión manual. No tienes que hacer un pago.\n\n" +
-      "Tu ID de vendedor es " + sellerId + ".";
+      "Recibimos tu solicitud. Plan: Freemium, sin destaque y sin coste.\n" +
+      "Tu ID de vendedor es " + sellerId + ".\n\n" +
+      "La solicitud queda pendiente de revisión manual. No tienes que hacer ningún pago.";
+    emailIntro = "Hemos recibido tu solicitud para el plan Freemium.";
+    statusMessage = "Tu solicitud queda pendiente de revisión manual. No tienes que hacer ningún pago.";
   }
 
+  var rowsHtml = detailRows.map(function (row) {
+    return '<tr><td style="padding:10px 12px;border-bottom:1px solid #e5e9eb;color:#53636a;">' +
+      escaparHtml_(row[0]) + '</td><td style="padding:10px 12px;border-bottom:1px solid #e5e9eb;' +
+      'text-align:right;font-weight:600;color:#1b252a;">' +
+      escaparHtml_(row[1]) + '</td></tr>';
+  }).join("");
+  var htmlBody = '<!doctype html><html lang="es"><body style="margin:0;padding:24px 12px;' +
+    'background:#f3f5f6;font-family:Arial,Helvetica,sans-serif;color:#1b252a;">' +
+    '<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center">' +
+    '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;' +
+    'background:#ffffff;border:1px solid #d6dde0;border-radius:14px;overflow:hidden;">' +
+    '<tr><td style="padding:22px 28px;background:#16424c;color:#ffffff;font-size:20px;font-weight:bold;">' +
+    'Percha &amp; Co.</td></tr><tr><td style="padding:28px;">' +
+    '<h1 style="margin:0 0 10px;font-size:24px;">Solicitud recibida</h1>' +
+    '<p style="margin:0 0 20px;color:#53636a;">Hola ' + nameSafe + '. ' +
+    escaparHtml_(emailIntro) + '</p>' +
+    '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;' +
+    'background:#f8fafb;border:1px solid #e5e9eb;border-radius:8px;">' + rowsHtml + '</table>' +
+    '<p style="margin:20px 0 6px;color:#53636a;">Tu ID de vendedor</p>' +
+    '<p style="margin:0;padding:12px;background:#eef4f5;border-radius:8px;font-family:monospace;' +
+    'font-size:15px;overflow-wrap:anywhere;">' + sellerIdSafe + '</p>' +
+    '<p style="margin:20px 0;color:#53636a;line-height:1.6;">' +
+    escaparHtml_(statusMessage) + '</p>' +
+    '<p style="margin:0 0 10px;font-weight:bold;">¿Necesitas ayuda?</p>' +
+    '<p style="margin:0 0 18px;color:#53636a;">Escríbenos a ' +
+    '<a href="mailto:' + contactEmailSafe + '" style="color:#16424c;">' +
+    contactEmailSafe + '</a> o contáctanos por WhatsApp.</p>' +
+    '<a href="' + escaparHtml_(whatsappUrl) + '" style="display:inline-block;padding:12px 18px;' +
+    'border-radius:8px;background:#138045;color:#ffffff;text-decoration:none;font-weight:bold;">' +
+    'Contactar por WhatsApp</a>' +
+    '<p style="margin:24px 0 0;color:#7a878c;font-size:12px;">Percha &amp; Co.</p>' +
+    '</td></tr></table></td></tr></table></body></html>';
+
   try {
-    MailApp.sendEmail(email, subject, body);
+    MailApp.sendEmail({
+      to: email,
+      subject: subject,
+      body: body,
+      htmlBody: htmlBody,
+      name: "Percha&Co",
+      replyTo: STORE_CONTACT_EMAIL
+    });
     emailSent = true;
   } catch (mailError) {
     console.error("La solicitud se guardó, pero no se pudo enviar el correo.", mailError);

@@ -5,7 +5,8 @@
 ### Hecho en React
 
 - Se añadió el formulario de alta de vendedores integrado con el catálogo actual, sin `react-router-dom`.
-- El formulario ofrece Freemium (gratis), Plus (9,99 €/mes) y Pro (14,99 €/mes), más las opciones de destaque e importes acordados; los importes mostrados incluyen IVA.
+- La tienda enlaza a una página de planes antes del formulario. Freemium abre con el destaque desactivado; Plus y Pro abren con un mes de destaque preseleccionado, que se puede revisar o cambiar antes de enviar.
+- El formulario ofrece Freemium (gratis), Plus (9,99 €/mes) y Pro (14,99 €/mes), más las opciones de destaque; los importes mostrados incluyen IVA.
 - Se valida en el navegador el DNI/NIE en PDF, JPG o PNG, hasta 5 MB. La validación del servidor sigue siendo obligatoria.
 - Se añadieron los términos para vendedores y la información de privacidad relativa al documento identificativo.
 - La compilación de producción (`npm.cmd run build`) pasó.
