@@ -289,10 +289,9 @@ function CookieBanner({ onInfo }) {
   }
   return (
     <div className="cookies" role="region" aria-label="Aviso de cookies">
-      <p>Este sitio no usa cookies de análisis ni de publicidad. Puedes aceptar o rechazar las no esenciales si algún día se añaden. <button className="link" onClick={onInfo}>Política de cookies</button></p>
+      <p>Este sitio no usa cookies de análisis ni de publicidad. Guarda tus preferencias y favoritos en tu dispositivo. <button className="link" onClick={onInfo}>Política de cookies</button></p>
       <div className="cookie-actions">
-        <button className="btn" onClick={() => choose('rechazar')}>Rechazar</button>
-        <button className="btn" onClick={() => choose('aceptar')}>Aceptar</button>
+        <button className="btn" onClick={() => choose('entendido')}>Entendido</button>
       </div>
     </div>
   )

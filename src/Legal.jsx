@@ -15,14 +15,15 @@ export function LegalText({ doc }) {
       <p>Estos términos regulan el alta de vendedores y la publicación de productos en {STORE_NAME}. Responsable del servicio: {v(OWNER.name)}. Contacto: {CONTACT_EMAIL}.</p>
       <h3>Servicio y ventas</h3>
       <p>{STORE_NAME} ofrece un catálogo y un espacio de contacto entre vendedores y compradores. La compraventa, el pago del producto, la entrega y las condiciones se acuerdan directamente entre las partes; {STORE_NAME} no recibe ni custodia los productos ni procesa el pago de esas compraventas. Los pagos de los planes y destaques de la plataforma se gestionan por Bizum según las instrucciones recibidas.</p>
-      <p>El vendedor es responsable de la exactitud de sus datos y anuncios, de la legalidad y estado de los artículos, de disponer de los derechos necesarios sobre las imágenes y de atender a los compradores. Nada de estos términos limita derechos u obligaciones que no puedan excluirse legalmente.</p>
+      <p>El vendedor es responsable de la exactitud de sus datos y anuncios, de la legalidad y estado de los artículos, de disponer de los derechos necesarios sobre las imágenes y de atender a los compradores. También debe tratar los datos de las personas compradoras únicamente para atender la consulta o gestionar la compraventa, cumplir la normativa aplicable y abstenerse de utilizarlos para publicidad no solicitada, fines ajenos a la operación o cesiones no autorizadas.</p>
+      <p>Los vendedores actúan por cuenta propia y son responsables de sus productos, comunicaciones, compromisos y actuaciones. {STORE_NAME} facilita su publicación y el contacto, pero no interviene en las compraventas entre terceros ni controla el uso que hagan de los datos o la información que reciban fuera de las funciones de la tienda. Esto no excluye las responsabilidades que legalmente correspondan a {STORE_NAME} ni limita derechos irrenunciables.</p>
       <h3>Planes y publicaciones</h3>
       <ul>
         <li>Freemium: hasta 5 productos activos, sin coste.</li>
         <li>Plus: hasta 10 productos activos, 9,99 € al mes.</li>
         <li>Pro: hasta 20 productos activos, 14,99 € al mes.</li>
       </ul>
-      <p>Los precios indicados incluyen IVA. Cada publicación corresponde a un producto; se admiten hasta 3 fotos por publicación y hasta 5 para el producto destacado. El sistema puede impedir nuevas publicaciones al alcanzar el límite del plan.</p>
+      <p>Los precios indicados incluyen IVA. Cada publicación corresponde a un producto; se admiten hasta 3 fotos por publicación y hasta 5 para el producto destacado. El límite de productos activos de cada plan es el indicado en la lista anterior.</p>
       <h3>Destaques</h3>
       <p>El destaque es opcional y adicional al plan: 1 semana por 1,99 €, 2 semanas por 2,99 €, 3 semanas por 4,99 € o mes completo por 9,99 €, IVA incluido. El mes completo termina en la misma fecha del mes siguiente. El cupo máximo es de cinco vendedores destacados simultáneamente. La solicitud reserva plaza durante 24 horas; si no se registra el pago dentro de ese plazo, se cancela. El período contratado corre desde la verificación del pago. Cada vendedor puede mostrar un único producto destacado; una vez publicado como destacado, no se puede sustituir por otro. La renovación añade una semana por 1,99 €, sujeta a la disponibilidad del cupo.
       </p>
@@ -42,6 +43,8 @@ export function LegalText({ doc }) {
       </ul>
       <p>{STORE_NAME} muestra un catálogo de productos. La compra se acuerda por contacto directo, a través de WhatsApp o correo electrónico.</p>
       <p>Algunos productos los ofrecen vendedores independientes, que se identifican en cada producto con la indicación "Vendido por". En esos casos, la compra se acuerda directamente entre el comprador y ese vendedor, a través de su WhatsApp. Los productos sin esa indicación los ofrece el titular de este sitio.</p>
+      <p>{STORE_NAME} facilita la publicación de información y el contacto. Salvo en las obligaciones que legalmente le correspondan, no es parte de las compraventas entre usuarios y no responde por los productos, acuerdos, mensajes o actuaciones de vendedores o terceros ajenos a las funciones de la tienda, ni por el uso que hagan de la información que reciban fuera de dichas funciones. Esta limitación no afecta a los derechos irrenunciables ni a las responsabilidades que no puedan excluirse legalmente.</p>
+      <p>Los enlaces a servicios externos, incluido WhatsApp, se rigen por las condiciones de sus respectivos proveedores. {STORE_NAME} no controla su disponibilidad ni sus contenidos.</p>
       <p>Los contenidos de este sitio (diseño, textos e imágenes) pertenecen a {BRAND}, salvo indicación en contrario. No pueden reproducirse sin autorización.</p>
       <p>Consultas y reclamaciones: {CONTACT_EMAIL}.</p>
     </>
@@ -52,14 +55,14 @@ export function LegalText({ doc }) {
       <p>Esta política explica cómo tratamos los datos de quienes visitan la tienda y compran, y de los vendedores que solicitan publicar productos en {STORE_NAME}.</p>
 
       <h3>Visitantes y compradores</h3>
-      <p><b>Datos:</b> este sitio no tiene formularios ni cuentas. Tratamos lo que nos envíes por WhatsApp (tu número de teléfono y el contenido del mensaje) o por correo electrónico. Al cargar la tienda, tu navegador se conecta a servicios de Google para obtener los productos y las fotos, y Google recibe tu dirección IP y datos técnicos de la conexión. Tu lista de favoritos se guarda solo en tu navegador y no la recibimos, salvo que nos la envíes tú por WhatsApp.</p>
+      <p><b>Datos:</b> las personas compradoras no necesitan crear una cuenta. Tratamos los datos que nos envíes por WhatsApp (tu número de teléfono y el contenido del mensaje) o por correo electrónico. Al cargar la tienda, el navegador se conecta a proveedores técnicos para mostrar el catálogo y las imágenes; estos pueden recibir la dirección IP y datos técnicos de la conexión. La lista de favoritos se conserva en tu dispositivo y no la recibimos, salvo que decidas compartirla por WhatsApp.</p>
       <p><b>Finalidades y base legal:</b></p>
       <ul>
         <li>Responder tus consultas y atender tu pedido: tu consentimiento al contactarnos y las medidas precontractuales o el contrato que pidas.</li>
         <li>Gestionar reclamaciones y cumplir obligaciones legales: obligación legal.</li>
         <li>Mostrarte el catálogo y que la tienda funcione: interés legítimo en prestar el servicio.</li>
       </ul>
-      <p><b>Si el producto lo vende un vendedor independiente:</b> al escribirle por WhatsApp, tu teléfono y tu mensaje le llegan a ese vendedor, que los usa para atender tu consulta o pedido. {STORE_NAME} no recibe esa conversación ni participa en ella.</p>
+      <p><b>Si el producto lo vende un vendedor independiente:</b> al escribirle por WhatsApp, tu teléfono y tu mensaje se envían directamente a ese vendedor para atender la consulta o la compraventa. El vendedor actúa por cuenta propia y es responsable del uso posterior de esos datos. No debe utilizarlos para fines ajenos a la consulta o la operación, publicidad no solicitada ni cesiones no autorizadas. {STORE_NAME} no recibe ni controla esa conversación y no responde por usos posteriores ajenos a las funciones de la tienda, sin perjuicio de las responsabilidades que legalmente le correspondan.</p>
 
       <h3>Vendedores</h3>
       <p><b>Datos:</b> tu nombre comercial, WhatsApp, correo electrónico, la información de tus productos e imágenes y el documento identificativo (DNI/NIE) que aportes para verificar tu identidad y prevenir perfiles falsos y fraudes.</p>
@@ -69,24 +72,23 @@ export function LegalText({ doc }) {
         <li>Publicar tus productos mostrando tu nombre y tu WhatsApp para que los compradores te contacten: tu consentimiento, que nos das por escrito antes de publicar.</li>
         <li>Gestionar la relación contigo, comunicarnos sobre tus publicaciones y atender reclamaciones: la relación acordada contigo y, cuando corresponda, obligación legal.</li>
       </ul>
-      <p><b>Documento identificativo:</b> el DNI/NIE se guarda en una carpeta de Google Drive con acceso restringido al titular autorizado de {STORE_NAME}; no se publica ni se entrega a los compradores. Se conserva mientras la cuenta esté activa y se elimina al cerrar la cuenta. Si la solicitud se rechaza o cancela, se elimina en un máximo de 30 días. Conservaremos solo los datos que debamos mantener por una obligación legal o para gestionar reclamaciones.</p>
+      <p><b>Documento identificativo:</b> el DNI/NIE se utiliza para verificar tu identidad y prevenir perfiles falsos y fraudes. Su acceso está restringido al personal autorizado; no se publica ni se entrega a los compradores. Se conserva mientras la cuenta esté activa. Puedes solicitar el cierre de la cuenta y la eliminación del documento escribiendo a {CONTACT_EMAIL}. Si la solicitud se rechaza o cancela, el documento se elimina en un máximo de 30 días. Conservaremos únicamente los datos que debamos mantener por una obligación legal o para gestionar reclamaciones.</p>
       <p><b>Obligatoriedad:</b> darnos tu nombre y tu WhatsApp es necesario para publicar. Sin esos datos no podemos publicar tus productos.</p>
       <p><b>Retirada del consentimiento:</b> puedes retirarlo en cualquier momento escribiendo a {CONTACT_EMAIL}, sin que eso afecte a lo tratado antes. Dejaremos de mostrar tu nombre, tu número y tus productos.</p>
 
       <h3>Para todos</h3>
-      <p><b>Destinatarios:</b> el nombre, WhatsApp, productos e imágenes publicados son visibles para los visitantes de la tienda; el DNI/NIE no lo es. Los datos se guardan en servicios de Google (hoja de cálculo y almacenamiento), que nos prestan el servicio. El acceso a los documentos identificativos está restringido. No los cedemos a otros terceros salvo obligación legal. La conversación por WhatsApp se rige también por las condiciones de esa plataforma.</p>
-      <p><b>Transferencias internacionales:</b> los servicios de Google pueden tratar datos fuera del Espacio Económico Europeo; en ese caso se aplican las garantías que prevé la normativa de protección de datos.</p>
+      <p><b>Destinatarios:</b> el nombre, WhatsApp, productos e imágenes publicados son visibles para los visitantes de la tienda; el DNI/NIE no lo es. Compartimos los datos con proveedores que nos prestan servicios necesarios para el funcionamiento de la tienda, sujetos a obligaciones de confidencialidad y protección de datos. El acceso a los documentos identificativos está restringido. No los cedemos a otros terceros salvo obligación legal. Cuando contactas con un vendedor independiente, los datos que le envías son recibidos por este, que actúa por cuenta propia y debe tratarlos conforme a la normativa y únicamente para la finalidad de tu consulta o compraventa. La conversación por WhatsApp se rige también por las condiciones de esa plataforma.</p>
+      <p><b>Transferencias internacionales:</b> algunos proveedores podrían tratar datos fuera del Espacio Económico Europeo. Cuando esto ocurra, se aplicarán las garantías previstas por la normativa de protección de datos.</p>
       <p><b>Conservación:</b> los datos de consultas y pedidos, mientras sean necesarios para atenderlos y durante los plazos legales aplicables. Los datos de un vendedor, mientras esté activo; cuando se dé de baja o retire su consentimiento, dejamos de publicarlos y los conservamos solo durante los plazos legales que correspondan.</p>
       <p><b>Tus derechos:</b> acceso, rectificación, supresión, oposición, limitación del tratamiento y portabilidad. Escribinos a {CONTACT_EMAIL}. Si crees que no tratamos bien tus datos, puedes reclamar ante la Agencia Española de Protección de Datos (aepd.es).</p>
     </>
   )
   return (
     <>
-      <p>Este sitio web <b>no instala cookies propias ni de terceros</b> con fines de análisis, publicidad o seguimiento.</p>
-      <p>Guarda en tu navegador (localStorage), solo en tu dispositivo: la elección que hagas en el aviso de cookies y, si los marcas, tu lista de favoritos. Esta información no se envía a ningún servidor. Sirve para no volver a preguntarte y para recordar tus favoritos.</p>
-      <p>Al pulsar "Escribir por WhatsApp" se abre WhatsApp, que tiene sus propias políticas de privacidad y cookies.</p>
-      <p>Para mostrar los productos y las fotos, tu navegador se conecta a servicios de Google. No controlamos las cookies que esos servicios puedan usar; consulta sus políticas.</p>
-      <p>Si en el futuro se añaden cookies que requieran tu consentimiento (por ejemplo, de analítica), se te pedirá antes de instalarlas. Puedes borrar estos datos desde los ajustes de tu navegador.</p>
+      <p>Este sitio no utiliza cookies propias ni de terceros para analizar tu actividad, mostrar publicidad o realizar seguimiento. La elección del aviso y tu lista de favoritos se guardan en tu dispositivo mediante almacenamiento local del navegador; no se envían a {STORE_NAME}, salvo que decidas compartir tu lista por WhatsApp.</p>
+      <p>Al pulsar un enlace para contactar con {STORE_NAME} o con un vendedor independiente, se abre WhatsApp u otro servicio externo. Ese servicio puede utilizar sus propias cookies o tecnologías y se rige por sus propias políticas. Si contactas con un vendedor, este recibe los datos que incluyas y es responsable de cualquier uso posterior ajeno a la consulta o compraventa; {STORE_NAME} no controla esas prácticas ni las cookies de servicios externos.</p>
+      <p>El navegador también puede conectarse a proveedores técnicos para mostrar el catálogo y las imágenes. Estos proveedores podrían utilizar mecanismos técnicos propios; consulta sus políticas de privacidad y cookies.</p>
+      <p>Si en el futuro se incorporan cookies o tecnologías que requieran consentimiento, se solicitará antes de utilizarlas. Puedes borrar los datos guardados en tu dispositivo desde los ajustes del navegador.</p>
     </>
   )
 }
