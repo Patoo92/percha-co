@@ -29,7 +29,7 @@ El archivo [`apps-script/Code.gs`](./apps-script/Code.gs) contiene el backend co
 4. Ejecutar `probarCatalogoPublico`, `probarDisponibilidadDestaque` y `verificarCarpetaDni` en Apps Script. No probar altas con DNI real hasta validar una prueba sintética controlada.
 5. Ejecutar `configurarActivadoresPercha` una vez desde la cuenta propietaria y autorizar los permisos requeridos. El activador de edición es instalable (necesario para correo); el activador horario procesa vencimientos y aprobaciones.
 6. Revisar la respuesta del correo y completar las instrucciones concretas de Bizum. El script no inventa el número de Bizum.
-7. La sección visual de cinco productos destacados, selección del producto destacado, subida de productos de vendedores (incluido el límite de fotos) y cierre de cuenta con borrado inmediato del DNI aún requieren implementación.
+7. La tienda muestra hasta cinco productos destacados cuando la API devuelve `featured: true`; `Code.gs` calcula ese campo desde el estado y las fechas del destaque activo. La selección del producto destacado, subida de productos de vendedores (incluido el límite de fotos) y cierre de cuenta con borrado inmediato del DNI aún requieren implementación.
 8. Revisar los textos legales y la política de conservación con asesoramiento apropiado antes de publicar la recogida de DNI/NIE.
 9. Solo después de validar el backend, actualizar el despliegue web de Apps Script y hacer una prueba de integración sin datos personales.
 

@@ -167,6 +167,10 @@ function obtenerMapaVendedores_() {
   var activeCol = indiceColumna_(headers, "Activo");
   var planCol = indiceColumna_(headers, "Plan");
   var paymentCol = indiceColumna_(headers, "Estado_pago");
+  var featuredStateCol = indiceColumna_(headers, "Estado_Destaque");
+  var featuredEndCol = indiceColumna_(headers, "Fecha_Fin_Destaque");
+  var featuredProductCol = indiceColumna_(headers, "ID_Producto_Destacado");
+  var now = Date.now();
 
   rows.forEach(function (row) {
     var active = String(row[activeCol] || "").trim().toLowerCase();
@@ -180,7 +184,11 @@ function obtenerMapaVendedores_() {
     map[String(row[idCol])] = {
       approved: isActive && isPaidOrFreeApproved,
       name: String(row[nameCol] || ""),
-      whatsapp: String(row[phoneCol] || "").replace(/\D/g, "")
+      whatsapp: String(row[phoneCol] || "").replace(/\D/g, ""),
+      featured: String(row[featuredStateCol] || "").trim().toLowerCase() === "activo" &&
+        row[featuredEndCol] instanceof Date &&
+        row[featuredEndCol].getTime() > now,
+      featuredProductId: String(row[featuredProductCol] || "").trim()
     };
   });
 
@@ -241,6 +249,8 @@ function obtenerProductosPublicos_() {
 
     if (seller && seller.approved) {
       product.seller = { name: seller.name, whatsapp: seller.whatsapp };
+      product.featured = seller.featured &&
+        seller.featuredProductId === product.id;
     }
     products.push(product);
   });

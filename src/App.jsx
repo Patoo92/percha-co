@@ -381,6 +381,7 @@ export default function App() {
 
   const toggleFav = (id) => setFavs((f) => (f.includes(id) ? f.filter((x) => x !== id) : [...f, id]))
   const all = products || []
+  const featuredProducts = all.filter((product) => product.featured).slice(0, 5)
   const favProducts = all.filter((p) => favs.includes(p.id))
   const categoryProducts = category === 'favoritos' ? favProducts : all.filter((p) => category === 'todos' || p.category === category)
   const normalizedSearch = search.trim().toLocaleLowerCase('es')
@@ -454,6 +455,30 @@ export default function App() {
         <RegistroVendedor onVolver={() => setVista('catalogo')} onLegal={setLegal} />
       ) : (
       <main ref={catalogRef}>
+        {vista === 'catalogo' && featuredProducts.length > 0 && (
+          <section className="featured-section" aria-labelledby="featured-title">
+            <div className="featured-heading">
+              <span className="featured-eyebrow">Selección especial</span>
+              <h2 id="featured-title">Destacados</h2>
+              <p>Descubre productos seleccionados de nuestros vendedores.</p>
+            </div>
+            <ul className="grid featured-grid">
+              {featuredProducts.map((product) => (
+                <li key={product.id}>
+                  <button className="card featured-card" onClick={() => setSelected(product)}>
+                    <span className="featured-badge">Destacado</span>
+                    <Photo src={(product.images || [])[0]} name={product.name} />
+                    <span className="featured-card-info">
+                      <span className="card-name">{product.name}</span>
+                      <span className="featured-price">{money.format(product.price)}</span>
+                      {product.seller?.name && <span className="featured-seller">Por {product.seller.name}</span>}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
         {products && products.length > 0 && (
           <div className="tabs" ref={topRef} role="group" aria-label="Categorías">
             {[...CATEGORIES, ['favoritos', `Favoritos (${favProducts.length})`]].map(([k, label]) => (
