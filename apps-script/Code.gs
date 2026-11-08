@@ -359,6 +359,8 @@ function listarProductosVendedor(token) {
   var sellerCol = indiceColumna_(headers, "ID_Vendedor");
   var nameCol = indiceColumna_(headers, "Producto");
   var statusCol = indiceColumna_(headers, "Activo");
+  var idCol = indiceColumna_(headers, "ID");
+  var availabilityCol = indiceColumnaOpcional_(headers, "Disponibilidad");
   var reasonCol = headers.findIndex(function (header) {
     return normalizarEncabezado_(header) === normalizarEncabezado_("Motivo_Rechazo");
   });
@@ -367,8 +369,12 @@ function listarProductosVendedor(token) {
     var status = String(row[statusCol] || "");
     var isSuspended = status.trim().toLowerCase() === "suspendido";
     return {
+      id: String(row[idCol] || "").trim(),
       name: String(row[nameCol] || ""),
       status: status,
+      availability: normalizarDisponibilidadProducto_(
+        availabilityCol >= 0 ? row[availabilityCol] : ""
+      ),
       reason: isSuspended
         ? textoMotivoRechazo_(
           reasonCol >= 0 ? row[reasonCol] : "",
@@ -390,6 +396,45 @@ function listarProductosVendedor(token) {
   };
 }
 
+function actualizarDisponibilidadProductoVendedor(token, productId, availability) {
+  var seller = validarSesionVendedor_(token);
+  productId = String(productId || "").trim();
+  availability = String(availability || "").trim().toLowerCase();
+  if (!productId || ["disponible", "agotado", "bajo pedido"].indexOf(availability) < 0) {
+    throw validacionError_("Selecciona una disponibilidad válida.");
+  }
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var catalog = obtenerHojaCatalogo_(SpreadsheetApp.getActiveSpreadsheet());
+    var headers = asegurarColumnaDisponibilidadCatalogo_(catalog);
+    var lastRow = catalog.getLastRow();
+    if (lastRow < 2) throw validacionError_("No se encontró el producto.");
+
+    var rows = catalog.getRange(2, 1, lastRow - 1, headers.length).getDisplayValues();
+    var idCol = indiceColumna_(headers, "ID");
+    var sellerCol = indiceColumna_(headers, "ID_Vendedor");
+    var availabilityCol = indiceColumna_(headers, "Disponibilidad");
+    var rowIndex = rows.findIndex(function (row) {
+      return String(row[idCol] || "").trim() === productId;
+    });
+    if (rowIndex < 0 || String(rows[rowIndex][sellerCol] || "").trim() !== seller.id) {
+      throw validacionError_("No se encontró un producto tuyo para actualizar.");
+    }
+
+    catalog.getRange(rowIndex + 2, availabilityCol + 1)
+      .setValue(etiquetaDisponibilidadProducto_(availability));
+    return {
+      status: "success",
+      id: productId,
+      availability: availability
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function crearProductoVendedor(token, data) {
   var seller = validarSesionVendedor_(token);
   data = data || {};
@@ -403,8 +448,12 @@ function crearProductoVendedor(token, data) {
   var sizes = Array.isArray(data.sizes) ? data.sizes : [];
   var images = Array.isArray(data.images) ? data.images : [];
   var featured = data.featured === true;
+  var availability = String(data.availability || "disponible").trim().toLowerCase();
   if (name.length < 2 || name.length > 100 || /^[=+\-@]/.test(name)) {
     throw validacionError_("El nombre debe tener entre 2 y 100 caracteres y ser texto.");
+  }
+  if (["disponible", "agotado", "bajo pedido"].indexOf(availability) < 0) {
+    throw validacionError_("Selecciona una disponibilidad válida.");
   }
   if (!Number.isFinite(price) || price < 0 || price > 100000) {
     throw validacionError_("Introduce un precio válido entre 0 y 100.000 €.");
@@ -447,7 +496,7 @@ function crearProductoVendedor(token, data) {
     });
 
     var catalog = obtenerHojaCatalogo_(SpreadsheetApp.getActiveSpreadsheet());
-    var headers = leerEncabezados_(catalog);
+    var headers = asegurarColumnaDisponibilidadCatalogo_(catalog);
     var productId = "P-" + Utilities.getUuid();
     var fields = {
       producto: name,
@@ -457,6 +506,7 @@ function crearProductoVendedor(token, data) {
       categoria: category,
       descripcion: description,
       talles: category === "ropa" ? sizes.map(function (size) { return size.trim(); }).join(", ") : "",
+      disponibilidad: etiquetaDisponibilidadProducto_(availability),
       activo: "Pendiente",
       idvendedor: seller.id,
       fechasubida: new Date()
@@ -1149,6 +1199,13 @@ function doPost(e) {
     if (data.accion === "listarProductosVendedor") {
       return jsonOutput_(listarProductosVendedor(data.token));
     }
+    if (data.accion === "actualizarDisponibilidadProductoVendedor") {
+      return jsonOutput_(actualizarDisponibilidadProductoVendedor(
+        data.token,
+        data.productId,
+        data.availability
+      ));
+    }
     if (data.accion === "subirImagenProductoVendedor") {
       return jsonOutput_(subirImagenProductoVendedor(data.token, data.file));
     }
@@ -1174,6 +1231,22 @@ function normalizarEncabezado_(value) {
   return String(value || "").trim().toLowerCase().replace(/[\s_-]/g, "");
 }
 
+function normalizarDisponibilidadProducto_(value) {
+  var status = String(value || "").trim().toLowerCase();
+  return ["disponible", "agotado", "bajo pedido"].indexOf(status) >= 0
+    ? status
+    : "disponible";
+}
+
+function etiquetaDisponibilidadProducto_(value) {
+  var labels = {
+    disponible: "Disponible",
+    agotado: "Agotado",
+    "bajo pedido": "Bajo pedido"
+  };
+  return labels[normalizarDisponibilidadProducto_(value)];
+}
+
 function indiceColumna_(headers, name) {
   var wanted = normalizarEncabezado_(name);
   var index = headers.findIndex(function (header) {
@@ -1184,11 +1257,42 @@ function indiceColumna_(headers, name) {
   return index;
 }
 
+function indiceColumnaOpcional_(headers, name) {
+  var wanted = normalizarEncabezado_(name);
+  return headers.findIndex(function (header) {
+    return normalizarEncabezado_(header) === wanted;
+  });
+}
+
 function leerEncabezados_(sheet) {
   if (!sheet || sheet.getLastColumn() < 1) {
     throw new Error("La hoja no tiene encabezados.");
   }
   return sheet.getRange(1, 1, 1, sheet.getLastColumn()).getDisplayValues()[0];
+}
+
+function asegurarColumnaDisponibilidadCatalogo_(sheet) {
+  var headers = leerEncabezados_(sheet);
+  var availabilityCol = indiceColumnaOpcional_(headers, "Disponibilidad");
+  if (availabilityCol < 0) {
+    availabilityCol = headers.length;
+    sheet.getRange(1, availabilityCol + 1).setValue("Disponibilidad");
+    headers.push("Disponibilidad");
+  }
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow >= 2) {
+    var range = sheet.getRange(2, availabilityCol + 1, lastRow - 1, 1);
+    var values = range.getValues();
+    var hasEmptyValues = false;
+    values = values.map(function (row) {
+      if (String(row[0] || "").trim()) return row;
+      hasEmptyValues = true;
+      return ["Disponible"];
+    });
+    if (hasEmptyValues) range.setValues(values);
+  }
+  return headers;
 }
 
 function tieneEncabezadosCatalogo_(sheet) {
@@ -1353,7 +1457,9 @@ function obtenerProductosPublicos_() {
     description: indiceColumna_(headers, "Descripcion"),
     sizes: indiceColumna_(headers, "Talles"),
     status: indiceColumna_(headers, "Activo"),
-    sellerId: indiceColumna_(headers, "ID_Vendedor")
+    sellerId: indiceColumna_(headers, "ID_Vendedor"),
+    availability: indiceColumnaOpcional_(headers, "Disponibilidad"),
+    uploadedAt: indiceColumnaOpcional_(headers, "Fecha_Subida")
   };
   var sellers = obtenerMapaVendedores_();
   var products = [];
@@ -1382,8 +1488,17 @@ function obtenerProductosPublicos_() {
         ? sizesText.split(/[,;\n]/).map(function (size) {
             return size.trim();
           }).filter(Boolean)
-        : []
+        : [],
+      availability: normalizarDisponibilidadProducto_(
+        col.availability >= 0 ? row[col.availability] : ""
+      )
     };
+    if (col.uploadedAt >= 0 && row[col.uploadedAt]) {
+      var uploadedAt = row[col.uploadedAt] instanceof Date
+        ? row[col.uploadedAt]
+        : new Date(row[col.uploadedAt]);
+      if (!isNaN(uploadedAt.getTime())) product.createdAt = uploadedAt.toISOString();
+    }
 
     if (seller && seller.approved) {
       product.seller = { name: seller.name, whatsapp: seller.whatsapp };

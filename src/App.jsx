@@ -21,6 +21,17 @@ const sellerOf = (p) => (p && p.seller && PHONE_RE.test(String(p.seller.whatsapp
   ? { name: String(p.seller.name || '').trim(), phone: String(p.seller.whatsapp) }
   : null)
 const phoneOf = (p) => (sellerOf(p) ? sellerOf(p).phone : WHATSAPP_NUMBER)
+const AVAILABILITY_LABELS = {
+  disponible: 'Disponible',
+  agotado: 'Agotado',
+  'bajo pedido': 'Bajo pedido',
+}
+const productAvailability = (product) => {
+  const availability = String(product?.availability || '').trim().toLocaleLowerCase('es')
+  return Object.prototype.hasOwnProperty.call(AVAILABILITY_LABELS, availability)
+    ? availability
+    : 'disponible'
+}
 const base = import.meta.env.BASE_URL
 const DRIVE_IMAGE_PREFIX = 'drive:'
 
@@ -29,6 +40,7 @@ function imageUrl(src) {
 }
 
 function ProductImage({ src, name, alt = name }) {
+  const imageRef = useRef(null)
   const [resolvedSrc, setResolvedSrc] = useState(() =>
     src && !src.startsWith(DRIVE_IMAGE_PREFIX) ? imageUrl(src) : ''
   )
@@ -49,28 +61,46 @@ function ProductImage({ src, name, alt = name }) {
     url.searchParams.set('action', 'imagen')
     url.searchParams.set('id', imageId)
 
-    fetch(url)
-      .then((response) => {
-        if (!response.ok) throw new Error(`Error HTTP ${response.status}`)
-        return response.json()
-      })
-      .then((result) => {
-        if (typeof result.dataUrl !== 'string' || !result.dataUrl.startsWith('data:image/')) {
-          throw new Error(result.error || 'La respuesta no contiene una imagen válida')
-        }
-        if (active) setResolvedSrc(result.dataUrl)
-      })
-      .catch((err) => {
-        console.error(`No se pudo cargar la imagen de ${name}`, err)
-        if (active) setFailed(true)
-      })
+    const loadImage = () => {
+      fetch(url)
+        .then((response) => {
+          if (!response.ok) throw new Error(`Error HTTP ${response.status}`)
+          return response.json()
+        })
+        .then((result) => {
+          if (typeof result.dataUrl !== 'string' || !result.dataUrl.startsWith('data:image/')) {
+            throw new Error(result.error || 'La respuesta no contiene una imagen válida')
+          }
+          if (active) setResolvedSrc(result.dataUrl)
+        })
+        .catch((err) => {
+          console.error(`No se pudo cargar la imagen de ${name}`, err)
+          if (active) setFailed(true)
+        })
+    }
+
+    const node = imageRef.current
+    if ('IntersectionObserver' in window && node) {
+      const observer = new IntersectionObserver(([entry]) => {
+        if (!entry.isIntersecting) return
+        observer.disconnect()
+        loadImage()
+      }, { rootMargin: '300px' })
+      observer.observe(node)
+      return () => {
+        active = false
+        observer.disconnect()
+      }
+    }
+
+    loadImage()
 
     return () => { active = false }
   }, [src, name])
 
   if (!resolvedSrc || failed) {
     return (
-      <div className="ph" role={alt ? 'img' : undefined} aria-label={alt || undefined} aria-hidden={alt ? undefined : 'true'}>
+      <div ref={imageRef} className="ph" role={alt ? 'img' : undefined} aria-label={alt || undefined} aria-hidden={alt ? undefined : 'true'}>
         {failed ? name.charAt(0) : ''}
       </div>
     )
@@ -92,6 +122,11 @@ function ProductImage({ src, name, alt = name }) {
 function Photo({ src, name }) {
   if (src) return <ProductImage src={src} name={name} />
   return <div className="ph" aria-hidden="true">{name.charAt(0)}</div>
+}
+
+function AvailabilityBadge({ product }) {
+  const availability = productAvailability(product)
+  return <span className={`availability-badge is-${availability.replace(' ', '-')}`}>{AVAILABILITY_LABELS[availability]}</span>
 }
 
 function Heart({ on }) {
@@ -245,7 +280,8 @@ function Detail({ product, isFav, onToggleFav, onClose }) {
 
   const needsSize = sizes.length > 0 && !size
   const seller = sellerOf(product)
-  const msg = `Hola, me interesa "${product.name}"${size ? `, talle ${size}` : ''} (${money.format(product.price)}).${seller ? ` Lo vi en ${STORE_NAME}.` : ''}`
+  const availability = productAvailability(product)
+  const msg = `Hola, me interesa "${product.name}"${size ? `, talle ${size}` : ''} (${money.format(product.price)})${availability === 'bajo pedido' ? ', bajo pedido' : ''}.${seller ? ` Lo vi en ${STORE_NAME}.` : ''}`
   const wa = `https://wa.me/${phoneOf(product)}?text=${encodeURIComponent(msg)}`
 
   return (
@@ -270,6 +306,7 @@ function Detail({ product, isFav, onToggleFav, onClose }) {
             <FavButton product={product} isFav={isFav} onToggle={onToggleFav} inline />
           </div>
           <p className="price">{money.format(product.price)}</p>
+          <p className={`availability-text is-${availability.replace(' ', '-')}`}>{AVAILABILITY_LABELS[availability]}</p>
           {seller && seller.name && <p className="seller">Vendido por <b>{seller.name}</b></p>}
           {product.description && <p className="desc">{product.description}</p>}
           {sizes.length > 0 && (
@@ -282,10 +319,14 @@ function Detail({ product, isFav, onToggleFav, onClose }) {
               </div>
             </div>
           )}
-          {needsSize ? (
+          {availability === 'agotado' ? (
+            <button className="wa" disabled>Producto agotado</button>
+          ) : needsSize ? (
             <button className="wa" disabled>Elegí un talle para escribir</button>
           ) : (
-            <a className="wa" href={wa} target="_blank" rel="noopener noreferrer">Escribir por WhatsApp</a>
+            <a className="wa" href={wa} target="_blank" rel="noopener noreferrer">
+              {availability === 'bajo pedido' ? 'Consultar por WhatsApp' : 'Escribir por WhatsApp'}
+            </a>
           )}
         </div>
       </article>
@@ -426,6 +467,12 @@ export default function App() {
   const [selected, setSelected] = useState(null)
   const [category, setCategory] = useState('todos')
   const [search, setSearch] = useState('')
+  const [sizeFilter, setSizeFilter] = useState('')
+  const [sellerFilter, setSellerFilter] = useState('')
+  const [availabilityFilter, setAvailabilityFilter] = useState('')
+  const [minPrice, setMinPrice] = useState('')
+  const [maxPrice, setMaxPrice] = useState('')
+  const [sortOrder, setSortOrder] = useState('newest')
   const [page, setPage] = useState(1)
   const [legal, setLegal] = useState(null)
   const [favs, setFavs] = useState(() => {
@@ -474,16 +521,48 @@ export default function App() {
   const favProducts = all.filter((p) => favs.includes(p.id))
   const categoryProducts = category === 'favoritos' ? favProducts : all.filter((p) => category === 'todos' || p.category === category)
   const normalizedSearch = search.trim().toLocaleLowerCase('es')
-  const filtered = categoryProducts.filter((p) => !normalizedSearch || `${p.name} ${p.description || ''}`.toLocaleLowerCase('es').includes(normalizedSearch))
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const sizes = [...new Set(all.flatMap((product) => product.sizes || []))].sort((a, b) => a.localeCompare(b, 'es'))
+  const sellers = [...new Set(all.map((product) => product.seller?.name).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'))
+  const hasActiveFilters = Boolean(sizeFilter || sellerFilter || availabilityFilter || minPrice || maxPrice)
+  const filtered = categoryProducts.filter((product) => {
+    const availability = productAvailability(product)
+    const price = Number(product.price)
+    return (!normalizedSearch || `${product.name} ${product.description || ''}`.toLocaleLowerCase('es').includes(normalizedSearch)) &&
+      (!sizeFilter || (product.sizes || []).includes(sizeFilter)) &&
+      (!sellerFilter || product.seller?.name === sellerFilter) &&
+      (!availabilityFilter || availability === availabilityFilter) &&
+      (minPrice === '' || price >= Number(minPrice)) &&
+      (maxPrice === '' || price <= Number(maxPrice))
+  })
+  const sorted = [...filtered].sort((a, b) => {
+    if (sortOrder === 'price-asc') return Number(a.price) - Number(b.price)
+    if (sortOrder === 'price-desc') return Number(b.price) - Number(a.price)
+    const aDate = Date.parse(a.createdAt || '')
+    const bDate = Date.parse(b.createdAt || '')
+    if (Number.isFinite(aDate) && Number.isFinite(bDate)) return bDate - aDate
+    if (Number.isFinite(aDate)) return -1
+    if (Number.isFinite(bDate)) return 1
+    return 0
+  })
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE))
   const cur = Math.min(page, totalPages)
-  const shown = filtered.slice((cur - 1) * PAGE_SIZE, cur * PAGE_SIZE)
+  const shown = sorted.slice((cur - 1) * PAGE_SIZE, cur * PAGE_SIZE)
 
   const goPage = (n) => {
     setPage(n)
     topRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })
   }
   const pickCategory = (k) => { setCategory(k); setPage(1) }
+  const resetFilters = () => {
+    setSearch('')
+    setSizeFilter('')
+    setSellerFilter('')
+    setAvailabilityFilter('')
+    setMinPrice('')
+    setMaxPrice('')
+    setSortOrder('newest')
+    setPage(1)
+  }
   const selectMenuCategory = (k) => {
     setVista('catalogo')
     pickCategory(k)
@@ -508,13 +587,13 @@ export default function App() {
 
   const waGroups = () => {
     const groups = new Map()
-    favProducts.forEach((p) => {
+    favProducts.filter((product) => productAvailability(product) !== 'agotado').forEach((p) => {
       const phone = phoneOf(p)
       if (!groups.has(phone)) groups.set(phone, { phone, name: (sellerOf(p) || {}).name || '', items: [] })
       groups.get(phone).items.push(p)
     })
     return [...groups.values()].map((g) => {
-      const lines = g.items.slice(0, MAX_WA_ITEMS).map((p) => `- ${p.name} (${money.format(p.price)})${(p.sizes || []).length ? ' - talle a confirmar' : ''}`)
+      const lines = g.items.slice(0, MAX_WA_ITEMS).map((p) => `- ${p.name} (${money.format(p.price)})${(p.sizes || []).length ? ' - talle a confirmar' : ''}${productAvailability(p) === 'bajo pedido' ? ' - bajo pedido' : ''}`)
       const extra = g.items.length > MAX_WA_ITEMS ? `\n(y ${g.items.length - MAX_WA_ITEMS} más)` : ''
       return {
         ...g,
@@ -577,7 +656,10 @@ export default function App() {
                 <li key={product.id}>
                   <button className="card featured-card" onClick={() => setSelected(product)}>
                     <span className="featured-badge">Destacado</span>
-                    <Photo src={(product.images || [])[0]} name={product.name} />
+                    <span className="card-photo">
+                      <Photo src={(product.images || [])[0]} name={product.name} />
+                      <AvailabilityBadge product={product} />
+                    </span>
                     <span className="featured-card-info">
                       <span className="card-name">{product.name}</span>
                       <span className="featured-price">{money.format(product.price)}</span>
@@ -602,11 +684,53 @@ export default function App() {
             <input id="product-search" className="search-input" type="search" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1) }} placeholder="Buscar productos…" autoComplete="off" />
           </div>
         )}
+        {products && products.length > 0 && (
+          <div className="catalog-filters" role="group" aria-label="Filtros y ordenación">
+            <label className="catalog-filter">
+              <span>Ordenar por</span>
+              <select value={sortOrder} onChange={(event) => { setSortOrder(event.target.value); setPage(1) }}>
+                <option value="newest">Más recientes</option>
+                <option value="price-asc">Precio: menor a mayor</option>
+                <option value="price-desc">Precio: mayor a menor</option>
+              </select>
+            </label>
+            <label className="catalog-filter">
+              <span>Talle</span>
+              <select value={sizeFilter} onChange={(event) => { setSizeFilter(event.target.value); setPage(1) }}>
+                <option value="">Todos</option>
+                {sizes.map((size) => <option key={size} value={size}>{size}</option>)}
+              </select>
+            </label>
+            <label className="catalog-filter">
+              <span>Vendedor</span>
+              <select value={sellerFilter} onChange={(event) => { setSellerFilter(event.target.value); setPage(1) }}>
+                <option value="">Todos</option>
+                {sellers.map((seller) => <option key={seller} value={seller}>{seller}</option>)}
+              </select>
+            </label>
+            <label className="catalog-filter">
+              <span>Disponibilidad</span>
+              <select value={availabilityFilter} onChange={(event) => { setAvailabilityFilter(event.target.value); setPage(1) }}>
+                <option value="">Todas</option>
+                {Object.entries(AVAILABILITY_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </label>
+            <label className="catalog-filter">
+              <span>Precio desde (€)</span>
+              <input type="number" min="0" step="0.01" value={minPrice} onChange={(event) => { setMinPrice(event.target.value); setPage(1) }} />
+            </label>
+            <label className="catalog-filter">
+              <span>Precio hasta (€)</span>
+              <input type="number" min="0" step="0.01" value={maxPrice} onChange={(event) => { setMaxPrice(event.target.value); setPage(1) }} />
+            </label>
+            <button className="filter-reset" type="button" onClick={resetFilters}>Limpiar filtros</button>
+          </div>
+        )}
         {error && <p className="msg">No se pudieron cargar los productos. Probá recargar la página.</p>}
         {!error && !products && <LoadingProducts />}
         {products && products.length === 0 && <p className="msg">Todavía no hay productos publicados.</p>}
-        {products && products.length > 0 && filtered.length === 0 && (
-          <p className="msg">{normalizedSearch ? 'No se encontraron productos para esa búsqueda.' : category === 'favoritos' ? 'Todavía no marcaste favoritos. Tocá el corazón de un producto para guardarlo acá.' : 'No hay productos en esta categoría.'}</p>
+        {products && products.length > 0 && sorted.length === 0 && (
+          <p className="msg">{normalizedSearch || hasActiveFilters ? 'No hay productos que coincidan con la búsqueda y los filtros.' : category === 'favoritos' ? 'Todavía no marcaste favoritos. Tocá el corazón de un producto para guardarlo acá.' : 'No hay productos en esta categoría.'}</p>
         )}
         {category === 'favoritos' && favProducts.length > 0 && (
           <div className="fav-bar">
@@ -615,6 +739,9 @@ export default function App() {
                 {favGroups.length === 1 && !g.name ? 'Enviar mi lista por WhatsApp' : `Enviar a ${g.name || STORE_NAME} (${g.items.length})`}
               </a>
             ))}
+            {!favGroups.length && <p className="note">Tus productos favoritos están agotados; no se enviará una consulta por ellos.</p>}
+            {favProducts.some((product) => productAvailability(product) === 'agotado') && favGroups.length > 0 &&
+              <p className="note">Los productos agotados no se incluyen en la consulta.</p>}
             {favGroups.some((g) => g.truncated) && <p className="note">Se envían los primeros {MAX_WA_ITEMS} productos de cada lista.</p>}
           </div>
         )}
@@ -624,7 +751,10 @@ export default function App() {
               <li key={p.id} className="card-wrap">
                 <Reveal>
                   <button className="card" onClick={() => setSelected(p)}>
-                    <Photo src={(p.images || [])[0]} name={p.name} />
+                    <span className="card-photo">
+                      <Photo src={(p.images || [])[0]} name={p.name} />
+                      <AvailabilityBadge product={p} />
+                    </span>
                     <span className="card-name">{p.name}</span>
                   </button>
                   <FavButton product={p} isFav={favs.includes(p.id)} onToggle={() => toggleFav(p.id)} />

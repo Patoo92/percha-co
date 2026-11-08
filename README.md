@@ -38,13 +38,13 @@ El despliegue web publica `dist/` mediante GitHub Actions (`.github/workflows/de
 Frontend:
 
 1. Ejecutar `npm run build`.
-2. Hacer push a `main`. GitHub Actions compila y publica `dist/` por FTP en InfinityFree.
+2. Hacer push a `main`. GitHub Actions compila y publica `dist/` por FTPS en InfinityFree.
 
 Backend de Apps Script:
 
 1. Copiar `apps-script/Code.gs` y `apps-script/ProductImageUploader.html` al proyecto vinculado a la hoja.
 2. Configurar las propiedades del script indicadas en este README (`STORE_OWNER_EMAIL`, `DNI_FOLDER_ID` y, si se desea, los límites de registro y `TEMP_IMAGE_RETENTION_HOURS`). El correo de contacto `STORE_CONTACT_EMAIL` es una constante de `Code.gs`, no una propiedad del script.
-3. Implementar el proyecto como aplicación web y mantener la URL de implementación en `PRODUCTS_API_URL`.
+3. Implementar el proyecto como aplicación web y mantener la URL de implementación en `PRODUCTS_API_URL`. Al actualizar un despliegue existente, crear una versión nueva de la implementación para que los cambios del API queden activos.
 4. Ejecutar `configurarActivadoresPercha` desde la cuenta propietaria y autorizar los permisos.
 
 ## Formato del catálogo
@@ -54,6 +54,8 @@ El endpoint público debe devolver un arreglo JSON con `id`, `name`, `price`, `c
 - `images`: rutas locales de `public/`, URLs completas o referencias `drive:<ID>` que se resuelven con `?action=imagen` en Apps Script. Hasta 3 fotos por publicación normal y 5 para el producto destacado activo; la primera es la que se ve en la tarjeta. Sin fotos se muestra un recuadro con la inicial.
 - `sizes`: solo ropa, por ejemplo `["S", "M", "L"]`. Si el producto tiene talles, hay que elegir uno antes de escribir por WhatsApp y el talle va en el mensaje.
 - `category`: `ropa` o `productos`.
+- `availability`: `disponible`, `agotado` o `bajo pedido`. Si falta o está vacío, el producto se considera disponible para conservar compatibilidad con el catálogo existente. El portal del vendedor permite actualizar este estado para sus productos; el propietario también puede editar la columna `Disponibilidad` en la hoja `Catalogo`. Apps Script crea la columna si falta al publicar un producto o guardar un cambio desde el portal; el propietario también puede añadirla manualmente. Los productos agotados no permiten iniciar consultas por WhatsApp ni se incluyen en el envío de favoritos; los productos bajo pedido sí permiten consultar.
+- La tienda permite filtrar por precio, talle, vendedor y disponibilidad, y ordenar por fecha de publicación o precio. La fecha pública se obtiene de `Fecha_Subida`.
 - Paginación: 12 productos por página con botones Anterior / números / Siguiente, sin recargar.
 - Favoritos: se guardan en el navegador de cada visitante (`localStorage`, clave `percha-favoritos`). No cambies el `id` de un producto ya publicado; los favoritos de productos borrados se ignoran.
 

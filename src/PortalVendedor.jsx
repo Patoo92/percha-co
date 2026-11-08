@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { API_URL } from './config.js'
+import { optimizeImage } from './optimizeImage.js'
 
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024
 const ACCEPTED_IMAGES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+const PRODUCT_AVAILABILITIES = ['disponible', 'agotado', 'bajo pedido']
 const SESSION_KEY = 'percha-seller-session'
 
 function readDataUrl(file) {
@@ -41,9 +43,10 @@ export default function PortalVendedor({ onBack }) {
   })
   const [seller, setSeller] = useState(null)
   const [products, setProducts] = useState([])
-  const [form, setForm] = useState({ name: '', price: '', category: 'ropa', description: '', sizes: '', featured: false })
+  const [form, setForm] = useState({ name: '', price: '', category: 'ropa', description: '', sizes: '', availability: 'disponible', featured: false })
   const [files, setFiles] = useState([])
   const [uploadedImages, setUploadedImages] = useState([])
+  const [availabilityUpdating, setAvailabilityUpdating] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
@@ -111,6 +114,25 @@ export default function PortalVendedor({ onBack }) {
     }
   }
 
+  const updateAvailability = async (product, availability) => {
+    setError('')
+    setNotice('')
+    setAvailabilityUpdating(product.id)
+    try {
+      await post('actualizarDisponibilidadProductoVendedor', {
+        token,
+        productId: product.id,
+        availability,
+      })
+      await loadProducts(token)
+      setNotice(`Disponibilidad de «${product.name}» actualizada.`)
+    } catch (requestError) {
+      setError(requestError.message)
+    } finally {
+      setAvailabilityUpdating('')
+    }
+  }
+
   const updateFiles = (event) => {
     const selectedFiles = Array.from(event.target.files || [])
     setError('')
@@ -158,13 +180,14 @@ export default function PortalVendedor({ onBack }) {
         const key = fileKey(file)
         let uploaded = uploadedImages.find((item) => item.key === key)
         if (!uploaded) {
-          setNotice(`Subiendo imagen ${index + 1} de ${files.length}…`)
-          const dataUrl = await readDataUrl(file)
+          setNotice(`Optimizando y subiendo imagen ${index + 1} de ${files.length}…`)
+          const optimizedFile = await optimizeImage(file)
+          const dataUrl = await readDataUrl(optimizedFile)
           const result = await post('subirImagenProductoVendedor', {
             token,
             file: {
-              name: file.name,
-              mimeType: file.type,
+              name: optimizedFile.name,
+              mimeType: optimizedFile.type,
               base64: dataUrl.slice(dataUrl.indexOf(',') + 1),
             },
           })
@@ -189,12 +212,13 @@ export default function PortalVendedor({ onBack }) {
           category: form.category,
           description: form.description,
           sizes: form.category === 'ropa' ? form.sizes.split(',').map((size) => size.trim()).filter(Boolean) : [],
+          availability: form.availability,
           featured: form.featured,
           images,
         },
       })
       await loadProducts(token)
-      setForm({ name: '', price: '', category: 'ropa', description: '', sizes: '', featured: false })
+      setForm({ name: '', price: '', category: 'ropa', description: '', sizes: '', availability: 'disponible', featured: false })
       setFiles([])
       setUploadedImages([])
       const input = document.getElementById('seller-product-images')
@@ -280,6 +304,14 @@ export default function PortalVendedor({ onBack }) {
                 <option value="productos">Productos</option>
               </select>
             </label>
+            <label className="registration-field">
+              <span>Disponibilidad</span>
+              <select value={form.availability} onChange={(event) => setForm((current) => ({ ...current, availability: event.target.value }))}>
+                {PRODUCT_AVAILABILITIES.map((availability) => (
+                  <option key={availability} value={availability}>{availability === 'bajo pedido' ? 'Bajo pedido' : availability.charAt(0).toUpperCase() + availability.slice(1)}</option>
+                ))}
+              </select>
+            </label>
             {form.category === 'ropa' && (
               <label className="registration-field">
                 <span>Talles disponibles</span>
@@ -317,8 +349,22 @@ export default function PortalVendedor({ onBack }) {
             {products.length ? (
               <ul>{products.map((product, index) => (
                 <li key={`${product.name}-${index}`}>
-                  <span>{product.name}{product.reason && <small className="seller-product-reason">{product.reason}</small>}</span>
-                  <strong>{product.status}</strong>
+                  <span className="seller-product-name">{product.name}{product.reason && <small className="seller-product-reason">{product.reason}</small>}</span>
+                  <div className="seller-product-controls">
+                    <strong>{product.status}</strong>
+                    <label className="seller-availability">
+                      <span className="sr-only">Disponibilidad de {product.name}</span>
+                      <select
+                        value={product.availability}
+                        disabled={availabilityUpdating === product.id}
+                        onChange={(event) => updateAvailability(product, event.target.value)}
+                      >
+                        {PRODUCT_AVAILABILITIES.map((availability) => (
+                          <option key={availability} value={availability}>{availability === 'bajo pedido' ? 'Bajo pedido' : availability.charAt(0).toUpperCase() + availability.slice(1)}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
                 </li>
               ))}</ul>
             ) : <p className="registration-note">Todavía no enviaste productos.</p>}
