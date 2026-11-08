@@ -161,6 +161,7 @@ button:not(:disabled):active{transform:scale(.97)}
 .registration-intro{margin:0 0 22px;color:var(--muted)}
 .registration-back{font:inherit}
 .registration-form{display:grid;gap:18px;padding:clamp(18px,4vw,28px);border:1px solid var(--line);border-radius:14px;background:var(--card)}
+.registration-honeypot{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
 .registration-field{display:grid;gap:6px;font-weight:600}
 .registration-field input,.registration-field select{width:100%;min-height:46px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit;font-weight:400}
 .registration-field input[type=file]{padding:8px}
@@ -190,6 +191,7 @@ button:not(:disabled):active{transform:scale(.97)}
 .seller-products ul{list-style:none;padding:0;margin:12px 0 0}
 .seller-products li{display:flex;justify-content:space-between;gap:16px;padding:10px 0;border-top:1px solid var(--line)}
 .seller-products li strong{font-size:.9rem;color:var(--muted)}
+.seller-product-reason{display:block;margin-top:4px;color:var(--muted);font-size:.85rem}
 @media (max-width:640px){.seller-portal-entry{display:none}}
 .featured-section{margin:8px 0 36px;padding:clamp(18px,4vw,32px);border:1px solid #e6d9bd;border-radius:20px;background:linear-gradient(135deg,#fffaf0 0%,var(--card) 72%);box-shadow:0 12px 32px rgba(67,50,21,.07)}
 .featured-heading{margin:0 0 18px}

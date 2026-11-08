@@ -15,6 +15,50 @@ var PRODUCT_IMAGE_TYPES = ["image/jpeg", "image/png", "image/gif", "image/webp"]
 var STORE_CONTACT_EMAIL = "patoog58@gmail.com";
 var STORE_WHATSAPP_NUMBER = "34600369376";
 var BIZUM_PHONE_NUMBER = "+34 600 369 376";
+var MAX_REGISTROS_POR_EMAIL = 3;
+var MAX_REGISTROS_GLOBALES_HORA = 20;
+
+function neutralizarFormula_(value) {
+  var text = String(value == null ? "" : value);
+  return /^\s*[=+\-@]/.test(text) ? "'" + text : text;
+}
+
+function validacionError_(message) {
+  var error = new Error(String(message));
+  error.publicMessage = String(message);
+  return error;
+}
+
+function respuestaError_(error, contexto) {
+  if (error && error.publicMessage) {
+    return { status: "error", message: error.publicMessage };
+  }
+  console.error("Error interno en " + contexto + ":", error);
+  return {
+    status: "error",
+    message: "No se pudo completar la solicitud. Inténtalo de nuevo más tarde."
+  };
+}
+
+function normalizarEmailContacto_(value) {
+  var text = String(value == null ? "" : value).trim();
+  if (/^'[=+\-@]/.test(text)) text = text.slice(1);
+  return text.toLowerCase();
+}
+
+function normalizarEmailHoja_(value) {
+  var email = normalizarEmailContacto_(value);
+  var at = email.lastIndexOf("@");
+  if (at < 1) return email;
+
+  var local = email.slice(0, at);
+  var domain = email.slice(at + 1);
+  if (domain !== "gmail.com" && domain !== "googlemail.com") return email;
+
+  var plus = local.indexOf("+");
+  if (plus > 0) local = local.slice(0, plus);
+  return local.replace(/\./g, "") + "@gmail.com";
+}
 
 function escaparHtml_(value) {
   return String(value).replace(/[&<>"']/g, function (character) {
@@ -53,6 +97,9 @@ function onOpen() {
     .addItem("Aplicar solicitud seleccionada", "aplicarSolicitudImagenSeleccionada")
     .addItem("Proteger columna de imágenes", "protegerImagenesCatalogo")
     .addItem("Enviar bienvenida al vendedor seleccionado", "enviarBienvenidaSeleccionada")
+    .addItem("Rechazar vendedor seleccionado", "rechazarVendedorSeleccionado")
+    .addItem("Suspender producto seleccionado", "suspenderProductoSeleccionado")
+    .addItem("Limpiar imágenes temporales", "limpiarCargasTemporalesAbandonadas")
     .addToUi();
 }
 
@@ -84,6 +131,7 @@ function hashSellerSecret_(value) {
 }
 
 function buscarVendedorPorEmail_(email) {
+  email = normalizarEmailHoja_(email);
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("VENDEDORES_MKP");
   if (!sheet || sheet.getLastRow() < 2) return null;
 
@@ -94,30 +142,37 @@ function buscarVendedorPorEmail_(email) {
   var activeCol = indiceColumna_(headers, "Activo");
   var paymentCol = indiceColumna_(headers, "Estado_pago");
   var planCol = indiceColumna_(headers, "Plan");
+  var matches = [];
   for (var index = 0; index < rows.length; index++) {
-    if (String(rows[index][emailCol] || "").trim().toLowerCase() !== email) continue;
+    if (normalizarEmailHoja_(rows[index][emailCol]) !== email) continue;
 
     var active = String(rows[index][activeCol] || "").trim().toLowerCase();
     var payment = String(rows[index][paymentCol] || "").trim().toLowerCase();
     if (["si", "sí", "true", "activo"].indexOf(active) < 0 ||
-        (payment !== "aprobado" && payment !== "no_requerido")) return null;
+        (payment !== "aprobado" && payment !== "no_requerido")) continue;
 
-    return {
+    matches.push({
       id: String(rows[index][idCol] || "").trim(),
       email: email,
       plan: String(rows[index][planCol] || "").trim()
-    };
+    });
   }
-  return null;
+
+  if (matches.length > 1) {
+    console.error("Hay varias cuentas activas con el mismo correo; se bloquea el acceso OTP para evitar ambigüedad.");
+    return null;
+  }
+  return matches.length === 1 ? matches[0] : null;
 }
 
 function solicitarCodigoAccesoVendedor(email) {
-  email = String(email || "").trim().toLowerCase();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    throw new Error("Introduce un correo electrónico válido.");
+  var contactEmail = normalizarEmailContacto_(email);
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) {
+    throw validacionError_("Introduce un correo electrónico válido.");
   }
 
-  var emailHash = hashSellerSecret_(email);
+  var emailKey = normalizarEmailHoja_(contactEmail);
+  var emailHash = hashSellerSecret_(emailKey);
   var cache = CacheService.getScriptCache();
   var throttleKey = "seller-otp-throttle:" + emailHash;
   if (cache.get(throttleKey)) {
@@ -129,19 +184,19 @@ function solicitarCodigoAccesoVendedor(email) {
     return { status: "success", message: "Si la cuenta está aprobada, recibirás un código por correo." };
   }
 
-  var seller = buscarVendedorPorEmail_(email);
+  var seller = buscarVendedorPorEmail_(contactEmail);
   if (seller) {
     var code = String(
       parseInt(Utilities.getUuid().replace(/-/g, "").slice(0, 8), 16) % 1000000
     ).padStart(6, "0");
     cache.put("seller-otp:" + emailHash, JSON.stringify({
       sellerId: seller.id,
-      codeHash: hashSellerSecret_(email + ":" + code),
+      codeHash: hashSellerSecret_(emailKey + ":" + code),
       attempts: 0
     }), 600);
     try {
       MailApp.sendEmail({
-        to: email,
+        to: contactEmail,
         subject: "Tu código de acceso a Percha&Co",
         body: "Tu código de acceso de vendedor es " + code +
           ". Caduca en 10 minutos. Si no solicitaste este código, ignora el mensaje.",
@@ -152,7 +207,7 @@ function solicitarCodigoAccesoVendedor(email) {
     } catch (mailError) {
       cache.remove("seller-otp:" + emailHash);
       console.error("No se pudo enviar el código de acceso al vendedor.", mailError);
-      throw new Error("No se pudo enviar el código. Inténtalo más tarde o contacta con la tienda.");
+      throw validacionError_("No se pudo enviar el código. Inténtalo más tarde o contacta con la tienda.");
     }
   }
 
@@ -161,33 +216,34 @@ function solicitarCodigoAccesoVendedor(email) {
 }
 
 function verificarCodigoAccesoVendedor(email, code) {
-  email = String(email || "").trim().toLowerCase();
+  var contactEmail = normalizarEmailContacto_(email);
+  var emailKey = normalizarEmailHoja_(contactEmail);
   code = String(code || "").trim();
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !/^\d{6}$/.test(code)) {
-    throw new Error("El correo o el código no son válidos.");
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail) || !/^\d{6}$/.test(code)) {
+    throw validacionError_("El correo o el código no son válidos.");
   }
 
   var cache = CacheService.getScriptCache();
-  var emailHash = hashSellerSecret_(email);
+  var emailHash = hashSellerSecret_(emailKey);
   var otpKey = "seller-otp:" + emailHash;
   var raw = cache.get(otpKey);
-  if (!raw) throw new Error("El código caducó o no es válido. Solicita uno nuevo.");
+  if (!raw) throw validacionError_("El código caducó o no es válido. Solicita uno nuevo.");
 
   var otp = JSON.parse(raw);
   if (otp.attempts >= 5) {
     cache.remove(otpKey);
-    throw new Error("Se agotaron los intentos. Solicita un nuevo código.");
+    throw validacionError_("Se agotaron los intentos. Solicita un nuevo código.");
   }
-  if (otp.codeHash !== hashSellerSecret_(email + ":" + code)) {
+  if (otp.codeHash !== hashSellerSecret_(emailKey + ":" + code)) {
     otp.attempts++;
     cache.put(otpKey, JSON.stringify(otp), 600);
-    throw new Error("El código no es correcto.");
+    throw validacionError_("El código no es correcto.");
   }
   cache.remove(otpKey);
 
-  var seller = buscarVendedorPorEmail_(email);
+  var seller = buscarVendedorPorEmail_(contactEmail);
   if (!seller || seller.id !== otp.sellerId) {
-    throw new Error("La cuenta ya no está activa. Contacta con la tienda.");
+    throw validacionError_("La cuenta ya no está activa. Contacta con la tienda.");
   }
   var token = Utilities.getUuid() + Utilities.getUuid();
   cache.put("seller-session:" + hashSellerSecret_(token), seller.id, 21600);
@@ -197,17 +253,17 @@ function verificarCodigoAccesoVendedor(email, code) {
 function validarSesionVendedor_(token) {
   token = String(token || "");
   if (!/^[A-Za-z0-9-]{60,80}$/.test(token)) {
-    throw new Error("La sesión caducó. Vuelve a solicitar un código de acceso.");
+    throw validacionError_("La sesión caducó. Vuelve a solicitar un código de acceso.");
   }
   var sellerId = CacheService.getScriptCache().get(
     "seller-session:" + hashSellerSecret_(token)
   );
-  if (!sellerId) throw new Error("La sesión caducó. Vuelve a solicitar un código de acceso.");
+  if (!sellerId) throw validacionError_("La sesión caducó. Vuelve a solicitar un código de acceso.");
   var email = obtenerEmailVendedor(SpreadsheetApp.getActiveSpreadsheet(), sellerId)
     .trim().toLowerCase();
   var seller = buscarVendedorPorEmail_(email);
   if (!seller || seller.id !== sellerId) {
-    throw new Error("La cuenta ya no está activa. Contacta con la tienda.");
+    throw validacionError_("La cuenta ya no está activa. Contacta con la tienda.");
   }
   return seller;
 }
@@ -216,15 +272,15 @@ function subirImagenProductoVendedor(token, file) {
   var seller = validarSesionVendedor_(token);
   if (!file || typeof file.base64 !== "string" ||
       PRODUCT_IMAGE_TYPES.indexOf(String(file.mimeType || "").toLowerCase()) < 0) {
-    throw new Error("Selecciona una imagen JPG, PNG, GIF o WebP válida.");
+    throw validacionError_("Selecciona una imagen JPG, PNG, GIF o WebP válida.");
   }
   if (file.base64.length > Math.ceil(MAX_PUBLIC_IMAGE_BYTES / 3) * 4 + 4) {
-    throw new Error("Cada imagen debe pesar como máximo 5 MB.");
+    throw validacionError_("Cada imagen debe pesar como máximo 5 MB.");
   }
 
   var bytes = Utilities.base64Decode(file.base64.replace(/^data:[^;]+;base64,/i, ""));
   if (!bytes.length || bytes.length > MAX_PUBLIC_IMAGE_BYTES) {
-    throw new Error("Cada imagen debe pesar más de 0 y como máximo 5 MB.");
+    throw validacionError_("Cada imagen debe pesar más de 0 y como máximo 5 MB.");
   }
   var first = bytes.slice(0, 8).map(function (byte) { return (byte + 256) % 256; });
   var mimeType = String(file.mimeType).toLowerCase();
@@ -238,9 +294,10 @@ function subirImagenProductoVendedor(token, file) {
           String.fromCharCode.apply(null, bytes.slice(8, 12).map(function (byte) {
             return (byte + 256) % 256;
           })) === "WEBP";
-  if (!validSignature) throw new Error("El contenido no coincide con el formato de imagen.");
+  if (!validSignature) throw validacionError_("El contenido no coincide con el formato de imagen.");
 
   var safeName = String(file.name || "producto").replace(/[\u0000-\u001f\\/:*?"<>|]/g, "_").slice(0, 150);
+  if (/^\s*[=+\-@]/.test(safeName)) safeName = "_" + safeName;
   var driveFile = obtenerCarpetaImagenesProducto_().createFile(
     Utilities.newBlob(bytes, mimeType, safeName || "producto")
   );
@@ -256,15 +313,15 @@ function subirImagenProductoVendedor(token, file) {
 function obtenerCargaProductoVendedor_(seller, upload) {
   if (!upload || typeof upload.id !== "string" || !/^[A-Za-z0-9_-]{20,}$/.test(upload.id) ||
       typeof upload.token !== "string") {
-    throw new Error("Una imagen cargada ya no es válida. Vuelve a subirla.");
+    throw validacionError_("Una imagen cargada ya no es válida. Vuelve a subirla.");
   }
   var cache = CacheService.getScriptCache();
   var key = "seller-product-upload:" + upload.id;
   var record = cache.get(key);
-  if (!record) throw new Error("Una carga caducó. Vuelve a subir la imagen.");
+  if (!record) throw validacionError_("Una carga caducó. Vuelve a subir la imagen.");
   record = JSON.parse(record);
   if (record.sellerId !== seller.id || record.token !== upload.token) {
-    throw new Error("Una imagen cargada no pertenece a esta sesión.");
+    throw validacionError_("Una imagen cargada no pertenece a esta sesión.");
   }
   var file = DriveApp.getFileById(upload.id);
   var parents = file.getParents();
@@ -275,14 +332,14 @@ function obtenerCargaProductoVendedor_(seller, upload) {
   }
   if (!inProductFolder || PRODUCT_IMAGE_TYPES.indexOf(file.getMimeType()) < 0 ||
       file.getSize() > MAX_PUBLIC_IMAGE_BYTES) {
-    throw new Error("Una imagen no cumple los requisitos o no está en la carpeta privada.");
+    throw validacionError_("Una imagen no cumple los requisitos o no está en la carpeta privada.");
   }
   return { file: file, cacheKey: key };
 }
 
 function cancelarCargaProductoVendedor(token, uploads) {
   var seller = validarSesionVendedor_(token);
-  if (!Array.isArray(uploads)) throw new Error("La lista de imágenes no es válida.");
+  if (!Array.isArray(uploads)) throw validacionError_("La lista de imágenes no es válida.");
   uploads.forEach(function (upload) {
     var entry = obtenerCargaProductoVendedor_(seller, upload);
     entry.file.setTrashed(true);
@@ -300,11 +357,24 @@ function listarProductosVendedor(token) {
     : [];
   var sellerInfo = obtenerMapaVendedores_()[seller.id];
   var sellerCol = indiceColumna_(headers, "ID_Vendedor");
+  var nameCol = indiceColumna_(headers, "Producto");
+  var statusCol = indiceColumna_(headers, "Activo");
+  var reasonCol = headers.findIndex(function (header) {
+    return normalizarEncabezado_(header) === normalizarEncabezado_("Motivo_Rechazo");
+  });
   var owned = rows.filter(function (row) { return String(row[sellerCol]) === seller.id; });
   var statuses = owned.map(function (row) {
+    var status = String(row[statusCol] || "");
+    var isSuspended = status.trim().toLowerCase() === "suspendido";
     return {
-      name: String(row[indiceColumna_(headers, "Producto")] || ""),
-      status: String(row[indiceColumna_(headers, "Activo")] || "")
+      name: String(row[nameCol] || ""),
+      status: status,
+      reason: isSuspended
+        ? textoMotivoRechazo_(
+          reasonCol >= 0 ? row[reasonCol] : "",
+          "El producto no cumple los requisitos de la tienda."
+        )
+        : ""
     };
   });
   return {
@@ -327,40 +397,40 @@ function crearProductoVendedor(token, data) {
   var category = String(data.category || "").trim().toLowerCase();
   var description = String(data.description || "").trim();
   if (data.price === undefined || data.price === null || String(data.price).trim() === "") {
-    throw new Error("Introduce un precio válido entre 0 y 100.000 €.");
+    throw validacionError_("Introduce un precio válido entre 0 y 100.000 €.");
   }
   var price = Number(data.price);
   var sizes = Array.isArray(data.sizes) ? data.sizes : [];
   var images = Array.isArray(data.images) ? data.images : [];
   var featured = data.featured === true;
   if (name.length < 2 || name.length > 100 || /^[=+\-@]/.test(name)) {
-    throw new Error("El nombre debe tener entre 2 y 100 caracteres y ser texto.");
+    throw validacionError_("El nombre debe tener entre 2 y 100 caracteres y ser texto.");
   }
   if (!Number.isFinite(price) || price < 0 || price > 100000) {
-    throw new Error("Introduce un precio válido entre 0 y 100.000 €.");
+    throw validacionError_("Introduce un precio válido entre 0 y 100.000 €.");
   }
   if (["ropa", "productos"].indexOf(category) < 0) {
-    throw new Error("Selecciona una categoría válida.");
+    throw validacionError_("Selecciona una categoría válida.");
   }
   if (description.length > 1000 || /^[=+\-@]/.test(description)) {
-    throw new Error("La descripción no puede superar 1.000 caracteres ni comenzar con un símbolo de fórmula.");
+    throw validacionError_("La descripción no puede superar 1.000 caracteres ni comenzar con un símbolo de fórmula.");
   }
   if (category !== "ropa" && sizes.length) {
-    throw new Error("Solo se pueden indicar talles para productos de ropa.");
+    throw validacionError_("Solo se pueden indicar talles para productos de ropa.");
   }
   if (sizes.length > 20 || sizes.some(function (size) {
     return typeof size !== "string" || size.trim().length > 20 || /^[=+\-@]/.test(size.trim());
   })) {
-    throw new Error("Revisa la lista de talles.");
+    throw validacionError_("Revisa la lista de talles.");
   }
   var sellerInfo = obtenerMapaVendedores_()[seller.id];
   if (featured && (!sellerInfo || !sellerInfo.featured ||
       (sellerInfo.featuredProductId && sellerInfo.featuredProductId !== String(data.id || "")))) {
-    throw new Error("El destaque debe estar activo y disponible para esta publicación.");
+    throw validacionError_("El destaque debe estar activo y disponible para esta publicación.");
   }
   var maxImages = featured ? MAX_FEATURED_PRODUCT_IMAGES : MAX_PRODUCT_IMAGES;
   if (images.length < 1 || images.length > maxImages) {
-    throw new Error("Esta publicación admite entre 1 y " + maxImages + " imágenes.");
+    throw validacionError_("Esta publicación admite entre 1 y " + maxImages + " imágenes.");
   }
 
   var lock = LockService.getScriptLock();
@@ -368,7 +438,7 @@ function crearProductoVendedor(token, data) {
   var createdFiles = [];
   try {
     if (!puedeSubirProducto(seller.id)) {
-      throw new Error("Alcanzaste el límite de productos de tu plan.");
+      throw validacionError_("Alcanzaste el límite de productos de tu plan.");
     }
     var uploaded = images.map(function (image) {
       var verified = obtenerCargaProductoVendedor_(seller, image);
@@ -437,7 +507,10 @@ function crearProductoVendedor(token, data) {
 
 function asegurarColumnasRevisionVendedor_(sheet) {
   var headers = leerEncabezados_(sheet);
-  ["Estado_Revision", "Fecha_Bienvenida"].forEach(function (name) {
+  [
+    "Estado_Revision", "Fecha_Bienvenida", "Fecha_Cancelacion",
+    "Motivo_Rechazo", "Fecha_Aviso_Rechazo"
+  ].forEach(function (name) {
     var key = normalizarEncabezado_(name);
     if (headers.some(function (header) {
       return normalizarEncabezado_(header) === key;
@@ -466,6 +539,130 @@ function asegurarColumnasRevisionVendedor_(sheet) {
     sheet.getRange(index + 2, reviewCol + 1).setValue(state);
   });
   return headers;
+}
+
+function asegurarColumnasRechazoCatalogo_(sheet) {
+  var headers = leerEncabezados_(sheet);
+  ["Motivo_Rechazo", "Fecha_Aviso_Rechazo"].forEach(function (name) {
+    var key = normalizarEncabezado_(name);
+    if (headers.some(function (header) {
+      return normalizarEncabezado_(header) === key;
+    })) return;
+
+    sheet.getRange(1, headers.length + 1).setValue(name);
+    headers.push(name);
+  });
+  return headers;
+}
+
+function textoMotivoRechazo_(value, fallback) {
+  var text = String(value || "").trim();
+  if (/^'[=+\-@]/.test(text)) text = text.slice(1);
+  return text || fallback;
+}
+
+function limpiarAvisoRechazo_(sheet, headers, rowNumber) {
+  ["Motivo_Rechazo", "Fecha_Aviso_Rechazo"].forEach(function (name) {
+    var index = headers.findIndex(function (header) {
+      return normalizarEncabezado_(header) === normalizarEncabezado_(name);
+    });
+    if (index < 0) return;
+    var cell = sheet.getRange(rowNumber, index + 1);
+    if (cell.getValue()) cell.setValue("");
+  });
+}
+
+function notificarRechazoVendedor_(sheet, headers, rowNumber, motivo, asunto, intro) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    headers = asegurarColumnasRevisionVendedor_(sheet);
+    var noticeCol = indiceColumna_(headers, "Fecha_Aviso_Rechazo") + 1;
+    if (sheet.getRange(rowNumber, noticeCol).getValue()) return false;
+
+    var email = String(
+      sheet.getRange(rowNumber, indiceColumna_(headers, "Email") + 1).getValue() || ""
+    ).trim();
+    var name = String(
+      sheet.getRange(rowNumber, indiceColumna_(headers, "Nombre") + 1).getValue() || ""
+    ).trim();
+    if (!email) return false;
+
+    var reason = textoMotivoRechazo_(
+      sheet.getRange(rowNumber, indiceColumna_(headers, "Motivo_Rechazo") + 1).getValue(),
+      motivo || "No se indicó un motivo concreto. Responde a este correo para revisarlo."
+    );
+
+    try {
+      MailApp.sendEmail({
+        to: email,
+        subject: asunto || "Tu solicitud de vendedor no ha sido aprobada - Percha&Co",
+        body: "Hola" + (name ? " " + name : "") + ",\n\n" +
+          (intro || "Tu solicitud de vendedor en Percha&Co no ha sido aprobada.") + "\n\n" +
+          "Motivo: " + reason + "\n\n" +
+          "Si crees que es un error o necesitas más información, responde a este correo " +
+          "o escríbenos por WhatsApp.\n\n" +
+          "El equipo de Percha&Co",
+        name: "Percha&Co",
+        replyTo: STORE_CONTACT_EMAIL
+      });
+    } catch (mailError) {
+      console.error("No se pudo enviar el aviso de rechazo al vendedor.", mailError);
+      return false;
+    }
+
+    sheet.getRange(rowNumber, noticeCol).setValue(new Date());
+    return true;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function notificarRechazoProducto_(sheet, headers, rowNumber, motivo) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    headers = asegurarColumnasRechazoCatalogo_(sheet);
+    var noticeCol = indiceColumna_(headers, "Fecha_Aviso_Rechazo") + 1;
+    if (sheet.getRange(rowNumber, noticeCol).getValue()) return false;
+
+    var sellerId = String(
+      sheet.getRange(rowNumber, indiceColumna_(headers, "ID_Vendedor") + 1).getValue() || ""
+    ).trim();
+    var email = obtenerEmailVendedor(SpreadsheetApp.getActiveSpreadsheet(), sellerId);
+    if (!email) return false;
+
+    var productName = String(
+      sheet.getRange(rowNumber, indiceColumna_(headers, "Producto") + 1).getDisplayValue() || ""
+    ).trim();
+    var reason = textoMotivoRechazo_(
+      sheet.getRange(rowNumber, indiceColumna_(headers, "Motivo_Rechazo") + 1).getValue(),
+      motivo || "No se indicó un motivo concreto. Responde a este correo para revisarlo."
+    );
+
+    try {
+      MailApp.sendEmail({
+        to: email,
+        subject: "Producto no publicado en Percha&Co",
+        body: "Hola,\n\n" +
+          "El producto '" + productName + "' no se ha publicado o ha sido retirado de la tienda.\n\n" +
+          "Motivo: " + reason + "\n\n" +
+          "Si crees que es un error o necesitas más información, responde a este correo " +
+          "o escríbenos por WhatsApp.\n\n" +
+          "El equipo de Percha&Co",
+        name: "Percha&Co",
+        replyTo: STORE_CONTACT_EMAIL
+      });
+    } catch (mailError) {
+      console.error("No se pudo enviar el aviso de producto no publicado.", mailError);
+      return false;
+    }
+
+    sheet.getRange(rowNumber, noticeCol).setValue(new Date());
+    return true;
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function enviarBienvenidaVendedor_(sheet, headers, rowNumber) {
@@ -554,6 +751,93 @@ function enviarBienvenidaSeleccionada() {
   );
 }
 
+function rechazarVendedorSeleccionado() {
+  exigirPropietario_();
+  var sheet = SpreadsheetApp.getActiveSheet();
+  var range = sheet.getActiveRange();
+  if (!range || sheet.getName() !== "VENDEDORES_MKP" || range.getRow() < 2) {
+    throw new Error("Selecciona una fila de vendedor en VENDEDORES_MKP.");
+  }
+
+  var headers = asegurarColumnasRevisionVendedor_(sheet);
+  var rowNumber = range.getRow();
+  var email = String(
+    sheet.getRange(rowNumber, indiceColumna_(headers, "Email") + 1).getValue() || ""
+  ).trim();
+  if (!email) throw new Error("La fila seleccionada no tiene correo de vendedor.");
+
+  var ui = SpreadsheetApp.getUi();
+  var response = ui.prompt(
+    "Rechazar vendedor",
+    "Motivo del rechazo que recibirá el vendedor (entre 10 y 500 caracteres):",
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+
+  var reason = String(response.getResponseText() || "").trim();
+  if (reason.length < 10 || reason.length > 500) {
+    throw new Error("El motivo debe tener entre 10 y 500 caracteres.");
+  }
+
+  var now = new Date();
+  asignarCelda_(sheet, headers, rowNumber, "Motivo_Rechazo", neutralizarFormula_(reason));
+  asignarCelda_(sheet, headers, rowNumber, "Estado_Revision", "Rechazado");
+  asignarCelda_(sheet, headers, rowNumber, "Activo", "no");
+  asignarCelda_(sheet, headers, rowNumber, "Estado_Destaque", "Cancelado");
+  var cancellation = sheet.getRange(
+    rowNumber,
+    indiceColumna_(headers, "Fecha_Cancelacion") + 1
+  ).getValue();
+  if (!(cancellation instanceof Date)) {
+    asignarCelda_(sheet, headers, rowNumber, "Fecha_Cancelacion", now);
+  }
+
+  var sent = notificarRechazoVendedor_(sheet, headers, rowNumber, reason);
+  SpreadsheetApp.getActiveSpreadsheet().toast(
+    sent ? "Vendedor rechazado y aviso enviado." : "Vendedor rechazado. No se pudo enviar el aviso.",
+    "Percha & Co.",
+    8
+  );
+}
+
+function suspenderProductoSeleccionado() {
+  exigirPropietario_();
+  var sheet = SpreadsheetApp.getActiveSheet();
+  var range = sheet.getActiveRange();
+  if (!range || !esHojaCatalogo_(sheet) || range.getRow() < 2) {
+    throw new Error("Selecciona una fila de producto en la hoja del catálogo.");
+  }
+
+  var headers = asegurarColumnasRechazoCatalogo_(sheet);
+  var rowNumber = range.getRow();
+  var sellerId = String(
+    sheet.getRange(rowNumber, indiceColumna_(headers, "ID_Vendedor") + 1).getValue() || ""
+  ).trim();
+  if (!sellerId) throw new Error("El producto seleccionado no pertenece a un vendedor.");
+
+  var ui = SpreadsheetApp.getUi();
+  var response = ui.prompt(
+    "Suspender producto",
+    "Motivo que recibirá el vendedor (entre 10 y 500 caracteres):",
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (response.getSelectedButton() !== ui.Button.OK) return;
+
+  var reason = String(response.getResponseText() || "").trim();
+  if (reason.length < 10 || reason.length > 500) {
+    throw new Error("El motivo debe tener entre 10 y 500 caracteres.");
+  }
+
+  asignarCelda_(sheet, headers, rowNumber, "Motivo_Rechazo", neutralizarFormula_(reason));
+  asignarCelda_(sheet, headers, rowNumber, "Activo", "Suspendido");
+  var sent = notificarRechazoProducto_(sheet, headers, rowNumber, reason);
+  SpreadsheetApp.getActiveSpreadsheet().toast(
+    sent ? "Producto suspendido y aviso enviado." : "Producto suspendido. No se pudo enviar el aviso.",
+    "Percha & Co.",
+    8
+  );
+}
+
 function exigirPropietario_() {
   if (emailActivo_() !== emailPropietario_()) {
     throw new Error("Solo la tienda principal puede publicar o reemplazar las imágenes.");
@@ -570,10 +854,10 @@ function permisoImagenProducto_(sheet, rowNumber) {
   var sellerId = String(
     sheet.getRange(rowNumber, indiceColumna_(headers, "ID_Vendedor") + 1).getValue() || ""
   ).trim();
-  if (!sellerId || obtenerEmailVendedor(
+  if (!sellerId || normalizarEmailHoja_(obtenerEmailVendedor(
     SpreadsheetApp.getActiveSpreadsheet(),
     sellerId
-  ).trim().toLowerCase() !== email) {
+  )) !== normalizarEmailHoja_(email)) {
     throw new Error("Solo puedes solicitar cambios para tus propios productos usando el correo registrado.");
   }
   var seller = obtenerMapaVendedores_()[sellerId];
@@ -719,13 +1003,15 @@ function aplicarSolicitudImagenSeleccionada() {
       indiceColumna_(catalogHeaders, "ID_Vendedor") + 1
     ).getValue() || ""
   ).trim();
-  var sellerEmail = String(
-    requestSheet.getRange(rowNumber, indiceColumna_(requestHeaders, "Email") + 1).getValue() || ""
-  ).trim().toLowerCase();
+  var sellerEmail = normalizarEmailHoja_(
+    requestSheet.getRange(rowNumber, indiceColumna_(requestHeaders, "Email") + 1).getValue()
+  );
   var sellerRecord = obtenerMapaVendedores_()[sellerId];
   if (!sellerId || sellerId !== productSellerId ||
-      obtenerEmailVendedor(SpreadsheetApp.getActiveSpreadsheet(), sellerId)
-        .trim().toLowerCase() !== sellerEmail ||
+      normalizarEmailHoja_(obtenerEmailVendedor(
+        SpreadsheetApp.getActiveSpreadsheet(),
+        sellerId
+      )) !== sellerEmail ||
       !sellerRecord || !sellerRecord.approved) {
     throw new Error("La solicitud ya no corresponde al vendedor propietario del producto.");
   }
@@ -833,18 +1119,14 @@ function doGet(e) {
 
     return jsonOutput_({ status: "error", message: "Acción GET no válida." });
   } catch (error) {
-    console.error("Error en doGet:", error);
-    return jsonOutput_({
-      status: "error",
-      message: error.message || String(error)
-    });
+    return jsonOutput_(respuestaError_(error, "doGet"));
   }
 }
 
 function doPost(e) {
   try {
     if (!e || !e.postData || !e.postData.contents) {
-      throw new Error("Falta el contenido de la solicitud.");
+      throw validacionError_("Falta el contenido de la solicitud.");
     }
 
     var data = JSON.parse(e.postData.contents);
@@ -878,11 +1160,7 @@ function doPost(e) {
     }
     return jsonOutput_({ status: "error", message: "Acción no válida." });
   } catch (error) {
-    console.error("Error en doPost:", error);
-    return jsonOutput_({
-      status: "error",
-      message: error.message || String(error)
-    });
+    return jsonOutput_(respuestaError_(error, "doPost"));
   }
 }
 
@@ -958,7 +1236,11 @@ function referenciaImagen_(cell, rawValue) {
 }
 
 function referenciasImagen_(cell, rawValue) {
-  var richText = cell.getRichTextValue();
+  return referenciasImagenDesdeRichText_(cell.getRichTextValue(), rawValue)
+    .slice(0, MAX_FEATURED_PRODUCT_IMAGES);
+}
+
+function referenciasImagenDesdeRichText_(richText, rawValue) {
   var candidates = [];
 
   if (richText) {
@@ -989,7 +1271,7 @@ function referenciasImagen_(cell, rawValue) {
   }
   return references.filter(function (reference, index) {
     return references.indexOf(reference) === index;
-  }).slice(0, MAX_FEATURED_PRODUCT_IMAGES);
+  });
 }
 
 function convertirPrecio_(value) {
@@ -1174,7 +1456,7 @@ function prepararCarpetasFotosVendedores_() {
   var approvedSellers = obtenerMapaVendedores_();
   rows.forEach(function (row) {
     var sellerId = String(row[idCol] || "").trim();
-    var sellerEmail = String(row[emailCol] || "").trim().toLowerCase();
+    var sellerEmail = normalizarEmailContacto_(row[emailCol]);
     if (!sellerId || !sellerEmail || !approvedSellers[sellerId] ||
         !approvedSellers[sellerId].approved) return;
 
@@ -1210,15 +1492,16 @@ function subirImagenProducto(rowNumber, file) {
     throw new Error("Usa una imagen JPG, PNG, GIF o WebP.");
   }
   if (file.base64.length > Math.ceil(MAX_PUBLIC_IMAGE_BYTES / 3) * 4 + 4) {
-    throw new Error("Cada imagen debe pesar como máximo 5 MB.");
+    throw validacionError_("Cada imagen debe pesar como máximo 5 MB.");
   }
 
   var bytes = Utilities.base64Decode(file.base64);
   if (!bytes.length || bytes.length > MAX_PUBLIC_IMAGE_BYTES) {
-    throw new Error("Cada imagen debe pesar más de 0 y como máximo 5 MB.");
+    throw validacionError_("Cada imagen debe pesar más de 0 y como máximo 5 MB.");
   }
 
   var safeName = file.name.replace(/[\u0000-\u001f\\/:*?"<>|]/g, "_").slice(0, 150) || "producto";
+  if (/^\s*[=+\-@]/.test(safeName)) safeName = "_" + safeName;
   var blob = Utilities.newBlob(bytes, file.mimeType, safeName);
   var targetFolder = permission.role === "owner"
     ? obtenerCarpetaImagenesProducto_()
@@ -1367,12 +1650,12 @@ function crearSolicitudCambioImagenes(rowNumber, justification, imageUploads) {
     requests.getRange(requestRow, 1, 1, 12).setValues([[
       new Date(),
       productId,
-      productName,
+      neutralizarFormula_(productName),
       files.map(function (file) { return file.id; }).join("\n"),
-      files.map(function (file) { return file.name; }).join("\n"),
+      files.map(function (file) { return neutralizarFormula_(file.name); }).join("\n"),
       permission.sellerId,
-      permission.email,
-      reason,
+      neutralizarFormula_(permission.email),
+      neutralizarFormula_(reason),
       "Pendiente",
       rowNumber,
       "",
@@ -1415,24 +1698,24 @@ function eliminarImagenesCarga(rowNumber, imageUploads) {
 
 function obtenerImagenPublica_(imageId) {
   if (!/^[A-Za-z0-9_-]{20,}$/.test(imageId)) {
-    throw new Error("Referencia de imagen no válida.");
+    throw validacionError_("Referencia de imagen no válida.");
   }
 
   var isPublishedProductImage = obtenerProductosPublicos_().some(function (product) {
     return product.images.indexOf("drive:" + imageId) >= 0;
   });
   if (!isPublishedProductImage) {
-    throw new Error("La imagen no pertenece a un producto publicado.");
+    throw validacionError_("La imagen no pertenece a un producto publicado.");
   }
 
   var file = DriveApp.getFileById(imageId);
   var mimeType = file.getMimeType();
   var allowedTypes = ["image/jpeg", "image/png", "image/gif", "image/webp"];
   if (allowedTypes.indexOf(mimeType) < 0) {
-    throw new Error("El archivo no es un formato de imagen permitido.");
+    throw validacionError_("El archivo no es un formato de imagen permitido.");
   }
   if (file.getSize() > MAX_PUBLIC_IMAGE_BYTES) {
-    throw new Error("La imagen supera el límite de 5 MB.");
+    throw validacionError_("La imagen supera el límite de 5 MB.");
   }
 
   return {
@@ -1486,8 +1769,85 @@ function consultarDisponibilidadDestaque_() {
   };
 }
 
+function limiteRegistro_(name, fallback) {
+  var configured = Number(PropertiesService.getScriptProperties().getProperty(name));
+  return Number.isInteger(configured) && configured > 0
+    ? configured
+    : fallback;
+}
+
+function verificarEmailDisponible_(sheet, email) {
+  var normalizedEmail = normalizarEmailHoja_(email);
+  var headers = leerEncabezados_(sheet);
+  var emailCol = indiceColumna_(headers, "Email");
+  var reviewCol = indiceColumna_(headers, "Estado_Revision");
+  var paymentCol = indiceColumna_(headers, "Estado_pago");
+  var cancellationCol = indiceColumna_(headers, "Fecha_Cancelacion");
+  var rows = sheet.getLastRow() > 1
+    ? sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).getValues()
+    : [];
+  var hasOpenRequest = rows.some(function (row) {
+    if (normalizarEmailHoja_(row[emailCol]) !== normalizedEmail) return false;
+    var review = String(row[reviewCol] || "").trim().toLowerCase();
+    var payment = String(row[paymentCol] || "").trim().toLowerCase();
+    var cancellation = row[cancellationCol];
+    var isCancelled = cancellation instanceof Date
+      ? !isNaN(cancellation.getTime())
+      : String(cancellation || "").trim() !== "";
+    return !isCancelled &&
+      review !== "rechazado" &&
+      payment !== "rechazado" &&
+      payment !== "cancelado";
+  });
+
+  if (hasOpenRequest) {
+    throw validacionError_("Ya existe una solicitud o cuenta abierta con este correo electrónico. Usa otro correo o contacta con la tienda.");
+  }
+}
+
+function verificarLimiteRegistros_(sheet, email) {
+  var normalizedEmail = normalizarEmailHoja_(email);
+  var headers = leerEncabezados_(sheet);
+  var emailCol = indiceColumna_(headers, "Email");
+  var dateCol = indiceColumna_(headers, "Fecha_Registro");
+  var rows = sheet.getLastRow() > 1
+    ? sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).getValues()
+    : [];
+  var now = Date.now();
+  var hour = 60 * 60 * 1000;
+  var day = 24 * hour;
+  var perEmail = 0;
+  var lastHour = 0;
+
+  rows.forEach(function (row) {
+    var registeredAt = row[dateCol];
+    if (!(registeredAt instanceof Date)) registeredAt = new Date(registeredAt);
+    if (!(registeredAt instanceof Date) || isNaN(registeredAt.getTime())) return;
+    var age = now - registeredAt.getTime();
+    if (age < hour) lastHour++;
+    if (age < day && normalizarEmailHoja_(row[emailCol]) === normalizedEmail) {
+      perEmail++;
+    }
+  });
+
+  if (perEmail >= limiteRegistro_("MAX_REGISTROS_POR_EMAIL", MAX_REGISTROS_POR_EMAIL)) {
+    throw validacionError_("Se alcanzó el límite de solicitudes para este correo. Inténtalo más tarde.");
+  }
+  if (lastHour >= limiteRegistro_("MAX_REGISTROS_GLOBALES_HORA", MAX_REGISTROS_GLOBALES_HORA)) {
+    throw validacionError_("Se alcanzó el límite de solicitudes por ahora. Inténtalo más tarde.");
+  }
+}
+
 function registrarVendedor(datos) {
   datos = datos || {};
+  if (String(datos.website || "").trim()) {
+    return {
+      idVendedor: "V-" + Utilities.getUuid(),
+      emailEnviado: true,
+      avisoTiendaEnviado: true,
+      importe: 0
+    };
+  }
   var nombre = String(datos.nombre || "").trim();
   var whatsapp = String(datos.whatsapp || "").replace(/\D/g, "");
   var email = String(datos.email || "").trim().toLowerCase();
@@ -1495,22 +1855,22 @@ function registrarVendedor(datos) {
   var destaque = String(datos.destaque || "Ninguno");
 
   if (nombre.length < 2 || nombre.length > 100) {
-    throw new Error("El nombre debe tener entre 2 y 100 caracteres.");
+    throw validacionError_("El nombre debe tener entre 2 y 100 caracteres.");
   }
   if (!/^\d{8,15}$/.test(whatsapp)) {
-    throw new Error("El número de WhatsApp no es válido.");
+    throw validacionError_("El número de WhatsApp no es válido.");
   }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    throw new Error("El correo electrónico no es válido.");
+    throw validacionError_("El correo electrónico no es válido.");
   }
   if (!Object.prototype.hasOwnProperty.call(PLAN_PRICES, plan)) {
-    throw new Error("El plan seleccionado no es válido.");
+    throw validacionError_("El plan seleccionado no es válido.");
   }
   if (!Object.prototype.hasOwnProperty.call(FEATURED_PRICES, destaque)) {
-    throw new Error("La opción de destaque no es válida.");
+    throw validacionError_("La opción de destaque no es válida.");
   }
   if (datos.consentimiento !== true) {
-    throw new Error("Es necesario aceptar los términos y la política de privacidad.");
+    throw validacionError_("Es necesario aceptar los términos y la política de privacidad.");
   }
 
   var importe = PLAN_PRICES[plan] + FEATURED_PRICES[destaque];
@@ -1530,20 +1890,22 @@ function registrarVendedor(datos) {
   var documentId = "";
   try {
     asegurarColumnasRevisionVendedor_(sheet);
+    verificarEmailDisponible_(sheet, email);
     if (
       destaque !== "Ninguno" &&
       contarPlazasDestaque_(sheet) >= MAX_FEATURED_SELLERS
     ) {
-      throw new Error("El cupo de destaques está completo.");
+      throw validacionError_("El cupo de destaques está completo.");
     }
+    verificarLimiteRegistros_(sheet, email);
 
     documentId = guardarDocumentoDni_(sellerId, datos.documento);
     var headers = leerEncabezados_(sheet);
     var fields = {
       idvendedor: sellerId,
-      nombre: nombre,
+      nombre: neutralizarFormula_(nombre),
       whatsapp: whatsapp,
-      email: email,
+      email: neutralizarFormula_(email),
       activo: "no",
       consentimiento: "si",
       plan: plan,
@@ -1711,12 +2073,12 @@ function guardarDocumentoDni_(sellerId, file) {
     "image/png": "png"
   };
   if (!file || typeof file.base64 !== "string") {
-    throw new Error("Falta el archivo del documento.");
+    throw validacionError_("Falta el archivo del documento.");
   }
 
   var mimeType = String(file.mimeType || "").toLowerCase();
   if (!Object.prototype.hasOwnProperty.call(types, mimeType)) {
-    throw new Error("Formato no permitido. Usa PDF, JPG o PNG.");
+    throw validacionError_("Formato no permitido. Usa PDF, JPG o PNG.");
   }
 
   var base64 = file.base64.replace(/^data:[^;]+;base64,/i, "");
@@ -1725,12 +2087,12 @@ function guardarDocumentoDni_(sellerId, file) {
     base64.length > Math.ceil(MAX_ID_DOCUMENT_BYTES / 3) * 4 + 4 ||
     !/^[A-Za-z0-9+/]*={0,2}$/.test(base64)
   ) {
-    throw new Error("El archivo supera el límite de 5 MB o no es válido.");
+    throw validacionError_("El archivo supera el límite de 5 MB o no es válido.");
   }
 
   var bytes = Utilities.base64Decode(base64);
   if (!bytes.length || bytes.length > MAX_ID_DOCUMENT_BYTES) {
-    throw new Error("El archivo supera el límite de 5 MB o está vacío.");
+    throw validacionError_("El archivo supera el límite de 5 MB o está vacío.");
   }
 
   var first = bytes.slice(0, 8).map(function (byte) {
@@ -1746,7 +2108,7 @@ function guardarDocumentoDni_(sellerId, file) {
     signatureValid = first.join(",") === "137,80,78,71,13,10,26,10";
   }
   if (!signatureValid) {
-    throw new Error("El contenido del archivo no coincide con su formato.");
+    throw validacionError_("El contenido del archivo no coincide con su formato.");
   }
 
   var folderId = PropertiesService.getScriptProperties().getProperty("DNI_FOLDER_ID");
@@ -1947,6 +2309,7 @@ function activarPagoVendedor_(sheet, headers, rowNumber) {
   }
   asignarCelda_(sheet, headers, rowNumber, "Estado_Revision", "Aprobado");
   asignarCelda_(sheet, headers, rowNumber, "Activo", "si");
+  limpiarAvisoRechazo_(sheet, headers, rowNumber);
   enviarBienvenidaVendedor_(sheet, headers, rowNumber);
 }
 
@@ -1972,12 +2335,19 @@ function procesarEdicionInstalable(e) {
         asignarCelda_(sheet, headers, rowNumber, "Activo", "no");
         asignarCelda_(sheet, headers, rowNumber, "Estado_Destaque", "Cancelado");
         asignarCelda_(sheet, headers, rowNumber, "Fecha_Cancelacion", now);
+        notificarRechazoVendedor_(
+          sheet,
+          headers,
+          rowNumber,
+          "La solicitud no cumple los requisitos de la tienda."
+        );
       } else if (review === "aprobado") {
         var reviewPayment = String(
           sheet.getRange(rowNumber, paymentCol + 1).getValue() || ""
         ).trim().toLowerCase();
         if (reviewPayment === "no_requerido") {
           asignarCelda_(sheet, headers, rowNumber, "Activo", "si");
+          limpiarAvisoRechazo_(sheet, headers, rowNumber);
           enviarBienvenidaVendedor_(sheet, headers, rowNumber);
         } else if (reviewPayment === "aprobado") {
           activarPagoVendedor_(sheet, headers, rowNumber);
@@ -1996,6 +2366,23 @@ function procesarEdicionInstalable(e) {
         ).getValue();
         if (!(cancellation instanceof Date)) {
           asignarCelda_(sheet, headers, rowNumber, "Fecha_Cancelacion", now);
+        }
+        if (payment === "rechazado") {
+          notificarRechazoVendedor_(
+            sheet,
+            headers,
+            rowNumber,
+            "El pago no fue validado."
+          );
+        } else {
+          notificarRechazoVendedor_(
+            sheet,
+            headers,
+            rowNumber,
+            "La solicitud se canceló antes de completar el pago.",
+            "Solicitud cancelada - Percha&Co",
+            "Tu solicitud de vendedor en Percha&Co ha sido cancelada."
+          );
         }
       }
     } else if (editedColumn === activeCol) {
@@ -2016,6 +2403,7 @@ function procesarEdicionInstalable(e) {
           throw new Error("Solo se puede activar manualmente una cuenta Freemium sin pago.");
         }
         asignarCelda_(sheet, headers, rowNumber, "Estado_Revision", "Aprobado");
+        limpiarAvisoRechazo_(sheet, headers, rowNumber);
         enviarBienvenidaVendedor_(sheet, headers, rowNumber);
       }
     }
@@ -2027,25 +2415,16 @@ function procesarEdicionInstalable(e) {
   if (editedColumn !== productStatusCol) return;
 
   var status = String(e.range.getValue() || "").trim().toLowerCase();
-  if (status !== "suspendido") return;
+  if (status !== "suspendido") {
+    limpiarAvisoRechazo_(sheet, headers, rowNumber);
+    return;
+  }
 
-  var productName = sheet.getRange(
+  notificarRechazoProducto_(
+    sheet,
+    headers,
     rowNumber,
-    indiceColumna_(headers, "Producto") + 1
-  ).getValue();
-  var sellerId = sheet.getRange(
-    rowNumber,
-    indiceColumna_(headers, "ID_Vendedor") + 1
-  ).getValue();
-  var email = obtenerEmailVendedor(e.source, sellerId);
-  if (!email) return;
-
-  MailApp.sendEmail(
-    email,
-    "Aviso: producto suspendido en Percha&Co",
-    "Hola,\n\nEl producto '" + productName +
-      "' fue suspendido tras una revisión. Si tienes consultas, responde a este correo.\n\n" +
-      "El equipo de Percha&Co"
+    "El producto no cumple los requisitos de la tienda."
   );
 }
 
@@ -2059,7 +2438,7 @@ function obtenerEmailVendedor(spreadsheet, sellerId) {
 
   for (var i = 0; i < rows.length; i++) {
     if (String(rows[i][idCol]) === String(sellerId)) {
-      return String(rows[i][emailCol] || "");
+      return normalizarEmailContacto_(rows[i][emailCol]);
     }
   }
   return "";
@@ -2068,11 +2447,10 @@ function obtenerEmailVendedor(spreadsheet, sellerId) {
 function procesarSolicitudesVencidas_() {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("VENDEDORES_MKP");
   if (!sheet || sheet.getLastRow() < 2) return;
-  var headers = leerEncabezados_(sheet);
+  var headers = asegurarColumnasRevisionVendedor_(sheet);
   var rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).getValues();
   var paymentCol = indiceColumna_(headers, "Estado_pago");
   var deadlineCol = indiceColumna_(headers, "Fecha_Limite_Pago");
-  var cancellationCol = indiceColumna_(headers, "Fecha_Cancelacion");
   var now = new Date();
 
   rows.forEach(function (row, index) {
@@ -2084,28 +2462,25 @@ function procesarSolicitudesVencidas_() {
       deadline.getTime() <= now.getTime()
     ) {
       var rowNumber = index + 2;
-      var sellerId = row[indiceColumna_(headers, "ID_Vendedor")];
+      asignarCelda_(
+        sheet,
+        headers,
+        rowNumber,
+        "Motivo_Rechazo",
+        "No se registró el pago dentro de las 24 horas. La plaza de destaque queda libre."
+      );
       asignarCelda_(sheet, headers, rowNumber, "Estado_pago", "Cancelado");
       asignarCelda_(sheet, headers, rowNumber, "Activo", "no");
       asignarCelda_(sheet, headers, rowNumber, "Estado_Destaque", "Cancelado");
       asignarCelda_(sheet, headers, rowNumber, "Fecha_Cancelacion", now);
-      var email = obtenerEmailVendedor(
-        SpreadsheetApp.getActiveSpreadsheet(),
-        sellerId
+      notificarRechazoVendedor_(
+        sheet,
+        headers,
+        rowNumber,
+        "",
+        "Solicitud cancelada - Percha&Co",
+        "Tu solicitud de vendedor en Percha&Co ha sido cancelada."
       );
-      if (email) {
-        try {
-          MailApp.sendEmail(
-            email,
-            "Solicitud cancelada — Percha&Co",
-            "Tu solicitud venció porque no se registró el pago dentro de las 24 horas. " +
-              "La plaza de destaque queda libre. Si quieres volver a solicitar el alta, " +
-              "puedes completar el formulario otra vez."
-          );
-        } catch (mailError) {
-          console.error("No se pudo enviar el aviso de cancelación.", mailError);
-        }
-      }
     }
   });
 }
@@ -2193,6 +2568,103 @@ function borrarDocumentosCancelados_() {
   });
 }
 
+function idsImagenesCatalogo_() {
+  var ids = {};
+  var catalog = obtenerHojaCatalogo_(SpreadsheetApp.getActiveSpreadsheet());
+  var lastRow = catalog.getLastRow();
+  if (lastRow < 2) return ids;
+
+  var headers = leerEncabezados_(catalog);
+  var imageCol = indiceColumna_(headers, "Image_URL") + 1;
+  var range = catalog.getRange(2, imageCol, lastRow - 1, 1);
+  var richValues = range.getRichTextValues();
+  var rawValues = range.getDisplayValues();
+  richValues.forEach(function (row, index) {
+    referenciasImagenDesdeRichText_(row[0], rawValues[index][0]).forEach(function (reference) {
+      var id = reference.indexOf("drive:") === 0
+        ? reference.slice("drive:".length)
+        : extraerIdDrive_(reference);
+      if (/^[A-Za-z0-9_-]{20,}$/.test(id)) ids[id] = true;
+    });
+  });
+  return ids;
+}
+
+function idsPropuestasPendientes_() {
+  var ids = {};
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("SOLICITUDES_CAMBIO_IMAGENES");
+  if (!sheet || sheet.getLastRow() < 2) return ids;
+
+  var headers = leerEncabezados_(sheet);
+  var statusIndex = headers.findIndex(function (header) {
+    return normalizarEncabezado_(header) === normalizarEncabezado_("Estado");
+  });
+  var idsIndex = headers.findIndex(function (header) {
+    return normalizarEncabezado_(header) === normalizarEncabezado_("IDs_Propuestas");
+  });
+  if (statusIndex < 0 || idsIndex < 0) return ids;
+
+  var rows = sheet.getRange(2, 1, sheet.getLastRow() - 1, headers.length).getValues();
+  rows.forEach(function (row) {
+    if (String(row[statusIndex] || "").trim().toLowerCase() !== "pendiente") return;
+    String(row[idsIndex] || "").split(/[\n\r]+/).forEach(function (value) {
+      var id = value.trim();
+      if (/^[A-Za-z0-9_-]{20,}$/.test(id)) ids[id] = true;
+    });
+  });
+  return ids;
+}
+
+function borrarImagenTemporalCaducada_(file, cutoff, protegidos) {
+  if (!file || PRODUCT_IMAGE_TYPES.indexOf(file.getMimeType()) < 0) return false;
+  var created = file.getDateCreated();
+  if (!(created instanceof Date) || created.getTime() > cutoff) return false;
+  if (protegidos[file.getId()]) return false;
+  file.setTrashed(true);
+  return true;
+}
+
+function limpiarCargasTemporalesAbandonadas() {
+  var properties = PropertiesService.getScriptProperties();
+  var hours = Number(properties.getProperty("TEMP_IMAGE_RETENTION_HOURS"));
+  if (!Number.isFinite(hours) || hours <= 0) hours = 24;
+  var cutoff = Date.now() - hours * 60 * 60 * 1000;
+  var root = obtenerCarpetaImagenesProducto_();
+  var protegidos = idsImagenesCatalogo_();
+  var pending = idsPropuestasPendientes_();
+  Object.keys(pending).forEach(function (id) {
+    protegidos[id] = true;
+  });
+
+  var deleted = 0;
+  var failed = 0;
+  function borrar(file) {
+    try {
+      if (borrarImagenTemporalCaducada_(file, cutoff, protegidos)) deleted++;
+    } catch (error) {
+      failed++;
+      console.error("No se pudo limpiar una imagen temporal " + file.getId() + ".", error);
+    }
+  }
+
+  var rootFiles = root.getFiles();
+  while (rootFiles.hasNext()) borrar(rootFiles.next());
+
+  var folders = root.getFolders();
+  while (folders.hasNext()) {
+    var folder = folders.next();
+    if (!/^SOLICITUD_/.test(folder.getName())) continue;
+    var files = folder.getFiles();
+    while (files.hasNext()) borrar(files.next());
+  }
+
+  console.log(
+    "Limpieza de imágenes temporales: " + deleted + " eliminadas, " +
+    failed + " con error."
+  );
+  return { deleted: deleted, failed: failed };
+}
+
 function procesarAutomatizacionesCadaHora() {
   aprobarProductosPendientes48Horas();
   aprobarVendedoresFreemium48Horas_();
@@ -2201,6 +2673,7 @@ function procesarAutomatizacionesCadaHora() {
   procesarVencimientosDestaque_();
   enviarAvisosRenovacion_();
   borrarDocumentosCancelados_();
+  limpiarCargasTemporalesAbandonadas();
 }
 
 function configurarActivadoresPercha() {
@@ -2264,7 +2737,7 @@ function renovarDestaque(idVendedor, semanas) {
       start.getTime() <= Date.now() &&
       contarPlazasDestaque_(sheet, idVendedor) >= MAX_FEATURED_SELLERS
     ) {
-      throw new Error("El cupo de destaques está completo.");
+      throw validacionError_("El cupo de destaques está completo.");
     }
 
     asignarCelda_(sheet, headers, rowNumber, "Estado_Destaque", "Activo");

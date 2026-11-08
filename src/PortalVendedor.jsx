@@ -315,7 +315,12 @@ export default function PortalVendedor({ onBack }) {
           <section className="seller-products" aria-labelledby="seller-products-title">
             <h3 id="seller-products-title">Mis productos</h3>
             {products.length ? (
-              <ul>{products.map((product, index) => <li key={`${product.name}-${index}`}><span>{product.name}</span><strong>{product.status}</strong></li>)}</ul>
+              <ul>{products.map((product, index) => (
+                <li key={`${product.name}-${index}`}>
+                  <span>{product.name}{product.reason && <small className="seller-product-reason">{product.reason}</small>}</span>
+                  <strong>{product.status}</strong>
+                </li>
+              ))}</ul>
             ) : <p className="registration-note">Todavía no enviaste productos.</p>}
           </section>
         </>

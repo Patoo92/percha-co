@@ -38,6 +38,7 @@ export default function RegistroVendedor({ initialPlan, initialDestaque, onVolve
     plan: initialPlan,
     destaque: initialDestaque,
     consentimiento: false,
+    website: '',
   })
   const [documento, setDocumento] = useState(null)
   const [featuredAvailability, setFeaturedAvailability] = useState('loading')
@@ -167,6 +168,7 @@ export default function RegistroVendedor({ initialPlan, initialDestaque, onVolve
         plan: initialPlan,
         destaque: featuredAvailability === 'available' ? initialDestaque : 'Ninguno',
         consentimiento: false,
+        website: '',
       })
       const input = document.getElementById('registro-documento')
       if (input) input.value = ''
@@ -191,6 +193,12 @@ export default function RegistroVendedor({ initialPlan, initialDestaque, onVolve
       </p>
 
       <form className="registration-form" onSubmit={submit}>
+        <div className="registration-honeypot" aria-hidden="true">
+          <label>
+            No completar este campo
+            <input name="website" type="text" tabIndex="-1" autoComplete="off" value={form.website} onChange={updateForm} />
+          </label>
+        </div>
         <label className="registration-field">
           <span>Nombre comercial o de vendedor</span>
           <input name="nombre" type="text" autoComplete="organization" maxLength="100" value={form.nombre} onChange={updateForm} required />
