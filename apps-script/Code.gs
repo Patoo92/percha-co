@@ -1771,8 +1771,8 @@ function consultarDisponibilidadDestaque_() {
 
 function limiteRegistro_(name, fallback) {
   var configured = Number(PropertiesService.getScriptProperties().getProperty(name));
-  return Number.isInteger(configured) && configured > 0
-    ? configured
+  return Number.isFinite(configured) && configured > 0
+    ? Math.floor(configured)
     : fallback;
 }
 

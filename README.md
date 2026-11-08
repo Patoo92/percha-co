@@ -88,7 +88,7 @@ Valores configurables con propiedades de Apps Script:
 - `MAX_REGISTROS_POR_EMAIL`: por defecto `3`.
 - `MAX_REGISTROS_GLOBALES_HORA`: por defecto `20`.
 
-Ambas deben ser números enteros positivos; si no existen o el valor no es un entero positivo, se usa el valor por defecto. `TEMP_IMAGE_RETENTION_HOURS` es independiente: debe ser un número positivo y se usa tal cual, sin redondearlo.
+Ambas deben ser números positivos; los valores decimales se redondean hacia abajo con `Math.floor`. Un valor positivo menor que `1` queda en `0` y bloquea nuevas altas, por lo que conviene configurar un entero positivo. Si no existen, no son numéricos o son menores o iguales que cero, se usan los valores por defecto. `TEMP_IMAGE_RETENTION_HOURS` es independiente: debe ser un número positivo y se usa tal cual, sin redondearlo.
 
 ### Neutralización de fórmulas en las hojas
 
@@ -144,11 +144,11 @@ La carga de imágenes de productos usa archivos temporales en la carpeta privada
 
 Además de la limpieza horaria, el backend borra archivos en estos flujos concretos:
 
-- **Cancelar una carga de producto:** `cancelarCargaProductoVendedor` mueve a la papelera las imágenes temporales de esa carga y elimina su registro de caché (`Code.gs:345`).
-- **Descartar imágenes seleccionadas:** `eliminarImagenesCarga` mueve a la papelera las imágenes temporales validadas y limpia su caché (`Code.gs:1681`).
-- **Fallo de alta después de subir el DNI:** si `registrarVendedor` falla después de guardar el documento, intenta borrar el DNI con `setTrashed(true)`; si esa limpieza también falla, registra el error (`Code.gs:1924`).
-- **Fallo al aplicar una solicitud de imágenes:** si `aplicarSolicitudImagenSeleccionada` falla después de copiar las propuestas, borra las copias recién creadas en `IMAGENES_PRODUCTOS` (`Code.gs:1078`). No borra las propuestas originales ni las imágenes anteriores del producto; las imágenes anteriores que dejen de estar referenciadas las retirará la limpieza periódica después del plazo.
-- **DNI de cuentas canceladas:** `borrarDocumentosCancelados_` borra el archivo de `ID_ARCHIVO_DNI` cuando han pasado 30 días desde `Fecha_Cancelacion` y después vacía la celda (`Code.gs:2553`).
+- **Cancelar una carga de producto:** `cancelarCargaProductoVendedor` mueve a la papelera las imágenes temporales de esa carga y elimina su registro de caché.
+- **Descartar imágenes seleccionadas:** `eliminarImagenesCarga` mueve a la papelera las imágenes temporales validadas y limpia su caché.
+- **Fallo de alta después de subir el DNI:** si `registrarVendedor` falla después de guardar el documento, intenta borrarlo con `setTrashed(true)`; si esa limpieza también falla, registra el error.
+- **Fallo al aplicar una solicitud de imágenes:** si `aplicarSolicitudImagenSeleccionada` falla después de copiar las propuestas, borra las copias recién creadas en `IMAGENES_PRODUCTOS`. No borra las propuestas originales ni las imágenes anteriores del producto; las imágenes anteriores que dejen de estar referenciadas las retirará la limpieza periódica después del plazo.
+- **DNI de cuentas canceladas:** `borrarDocumentosCancelados_` borra el archivo de `ID_ARCHIVO_DNI` cuando han pasado 30 días desde `Fecha_Cancelacion` y después vacía la celda.
 
 ## Estado del trabajo
 
