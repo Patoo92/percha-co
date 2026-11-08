@@ -379,7 +379,7 @@ function Footer({ onLegal }) {
   )
 }
 
-function SellerPlans({ onBack, onChoose }) {
+function SellerPlans({ onBack, onChoose, onPortal }) {
   return (
     <main className="seller-plans">
       <button className="link registration-back" type="button" onClick={onBack}>← Volver a la tienda</button>
@@ -413,6 +413,7 @@ function SellerPlans({ onBack, onChoose }) {
         ))}
       </div>
       <p className="plans-note">Los destaques son opcionales. En el formulario podrás revisar y cambiar tu selección antes de enviar la solicitud. Precios con IVA incluido.</p>
+      <p className="plans-note">¿Ya eres vendedor? <button className="link" type="button" onClick={onPortal}>Accede al portal de vendedores</button>.</p>
     </main>
   )
 }
@@ -529,7 +530,7 @@ export default function App() {
         <h1 className="brand"><img src={base + 'logo.svg'} alt={STORE_NAME} /></h1>
         <div className="header-actions">
           <button className="seller-entry" onClick={openPlans}>Vende con nosotros</button>
-          <button className="seller-portal-entry" onClick={openSellerPortal}>Acceso vendedores</button>
+          <button className="seller-portal-entry" onClick={openSellerPortal}>Ya soy vendedor</button>
           <button className="theme-toggle" onClick={() => setTheme((t) => t === 'dark' ? 'light' : 'dark')} aria-label={theme === 'dark' ? 'Activar modo claro' : 'Activar modo oscuro'} aria-pressed={theme === 'dark'}>
             <ThemeIcon dark={theme === 'dark'} />
           </button>
@@ -544,19 +545,20 @@ export default function App() {
             ))}
             <button className="nav-link" onClick={() => selectMenuCategory('favoritos')}>Favoritos</button>
             <button className="nav-link" onClick={openPlans}>Planes para vendedores</button>
-            <button className="nav-link" onClick={openSellerPortal}>Área de vendedor</button>
+            <button className="nav-link" onClick={openSellerPortal}>Acceso para vendedores registrados</button>
             <button className="nav-link" onClick={() => { setMenuOpen(false); document.getElementById('contacto')?.scrollIntoView({ behavior: 'smooth' }) }}>Contacto</button>
           </nav>
         )}
       </header>
       {vista === 'planes' ? (
-        <SellerPlans onBack={() => setVista('catalogo')} onChoose={chooseSellerPlan} />
+        <SellerPlans onBack={() => setVista('catalogo')} onChoose={chooseSellerPlan} onPortal={openSellerPortal} />
       ) : vista === 'registro' ? (
         <RegistroVendedor
           key={`${sellerSelection.plan}-${sellerSelection.destaque}`}
           initialPlan={sellerSelection.plan}
           initialDestaque={sellerSelection.destaque}
           onVolver={() => setVista('planes')}
+          onPortal={openSellerPortal}
           onLegal={setLegal}
         />
       ) : vista === 'vendedor' ? (

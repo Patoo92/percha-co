@@ -1,6 +1,6 @@
 # Continuidad: portal de vendedores
 
-Actualizado: 6 de noviembre de 2026
+Actualizado: 8 de noviembre de 2026
 
 ## Publicado
 
@@ -11,26 +11,11 @@ Actualizado: 6 de noviembre de 2026
 - El texto del correo de bienvenida se ajustó con escapes Unicode. El propietario confirmó la recepción de una bienvenida; la captura mostraba caracteres acentuados incorrectos antes de este ajuste.
 - La compilación de producción pasó antes del despliegue. El árbol de trabajo quedó limpio después de publicar.
 
-## Incidencia pendiente: el código de acceso no llega
+## Incidencia resuelta: el código de acceso no llegaba
 
-El propietario informó que una cuenta activada no recibió el correo con el código para entrar al portal. La captura de la hoja muestra más de una fila con el mismo nombre y direcciones de correo diferentes. No se deben copiar direcciones ni otros datos personales a este documento o a registros de depuración.
+El vendedor confirmó que había escrito mal el correo al solicitar el código. Tras corregirlo, recibió el OTP y pudo acceder al área de vendedor. No se guardan direcciones ni otros datos personales en esta nota.
 
-Lo observado:
-
-- Había una ejecución `doPost` del despliegue web que terminó como **Completada**. Eso confirma que Apps Script procesó una petición, pero no confirma que se haya encontrado una cuenta elegible ni que Gmail haya aceptado el mensaje.
-- El portal responde deliberadamente con un mensaje genérico, también cuando no encuentra una cuenta activa elegible.
-- El código solo envía el mensaje si el correo normalizado coincide con una fila de `VENDEDORES_MKP` cuya columna `Activo` sea `si`, `sí`, `true` o `activo`, y cuyo `Estado_pago` sea `Aprobado` o `No_requerido`.
-- En la solicitud al usuario para confirmar qué dirección y qué mensaje mostró el portal se canceló el formulario. La causa exacta sigue sin verificarse.
-
-Próximos pasos para retomar:
-
-1. Pedir al vendedor que indique en privado cuál de sus filas aprobadas corresponde a la cuenta, y cotejar exactamente el correo usado en el portal (incluido cualquier alias `+...`). No solicitar ni compartir DNI.
-2. Confirmar con el vendedor el texto que muestra el portal tras pulsar **Enviar código** y la hora aproximada del intento.
-3. Revisar Spam y Todos los correos, buscando el asunto **Tu código de acceso a Percha&Co**.
-4. Correlacionar ese horario con las ejecuciones de Apps Script. Una ejecución `doPost` completada no basta para atribuir éxito al envío.
-5. Si el correo coincide y no llega, reproducir de forma controlada y revisar cuota/permisos de `MailApp` y errores de ejecución. No registrar OTP, DNI ni direcciones completas en logs.
-
-No se han hecho cambios adicionales para esta incidencia ni se ha enviado un correo de prueba.
+No se requirieron cambios en el backend ni correos de prueba. Si vuelve a ocurrir, comprobar primero que el correo introducido coincida con el registrado en la hoja.
 
 ## Activadores de Apps Script
 

@@ -30,7 +30,7 @@ function readFile(file) {
   })
 }
 
-export default function RegistroVendedor({ initialPlan, initialDestaque, onVolver, onLegal }) {
+export default function RegistroVendedor({ initialPlan, initialDestaque, onVolver, onPortal, onLegal }) {
   const [form, setForm] = useState({
     nombre: '',
     whatsapp: '',
@@ -185,7 +185,10 @@ export default function RegistroVendedor({ initialPlan, initialDestaque, onVolve
     <main className="seller-registration">
       <button className="link registration-back" type="button" onClick={onVolver}>← Volver a la tienda</button>
       <h2>Vende en Percha&amp;Co</h2>
-      <p className="registration-intro">Crea tu perfil de vendedor y elige el plan que mejor se adapte a tu catálogo.</p>
+      <p className="registration-intro">
+        Crea tu perfil de vendedor y elige el plan que mejor se adapte a tu catálogo.{' '}
+        ¿Ya tienes cuenta? <button className="link" type="button" onClick={onPortal}>Accede al portal de vendedores</button>.
+      </p>
 
       <form className="registration-form" onSubmit={submit}>
         <label className="registration-field">
