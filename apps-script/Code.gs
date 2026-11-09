@@ -2014,7 +2014,6 @@ function registrarVendedor(datos) {
     }
     verificarLimiteRegistros_(sheet, email);
 
-    documentId = guardarDocumentoDni_(sellerId, datos.documento);
     var headers = leerEncabezados_(sheet);
     var fields = {
       idvendedor: sellerId,
@@ -2036,14 +2035,25 @@ function registrarVendedor(datos) {
       fechacancelacion: "",
       idproductodestacado: "",
       estadorevision: "Pendiente",
-      fechabienvenida: ""
+      fechabienvenida: "",
+      motivorechazo: "",
+      fechaavisorechazo: ""
     };
+    var headerKeys = headers.map(normalizarEncabezado_);
+    var optionalKeys = ["motivorechazo", "fechaavisorechazo"];
+    Object.keys(fields).forEach(function (key) {
+      if (optionalKeys.indexOf(key) < 0 && headerKeys.indexOf(key) < 0) {
+        throw new Error(
+          "Falta la columna obligatoria \"" + key + "\" en VENDEDORES_MKP."
+        );
+      }
+    });
+
+    documentId = guardarDocumentoDni_(sellerId, datos.documento);
+    fields.idarchivodni = documentId;
     var row = headers.map(function (header) {
       var key = normalizarEncabezado_(header);
-      if (!Object.prototype.hasOwnProperty.call(fields, key)) {
-        throw new Error("Hay una columna no contemplada: " + header);
-      }
-      return fields[key];
+      return Object.prototype.hasOwnProperty.call(fields, key) ? fields[key] : "";
     });
     sheet.appendRow(row);
   } catch (error) {
